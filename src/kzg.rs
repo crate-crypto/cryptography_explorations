@@ -4,7 +4,7 @@ use crate::kzg_transcript::KZGParams;
 use crate::kzg_transcript::KZGProof;
 use crate::kzg_transcript::CRS;
 use ark_bn254::{Fr, G1Affine as G1, G2Affine as G2};
-use ark_ec::AffineRepr;
+use ark_ec::{AffineRepr, CurveGroup};
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::DenseUVPolynomial;
 use ark_poly::Polynomial;
@@ -51,17 +51,18 @@ impl KZGCommitment {
         (KZGCommitment { point: commitment }, proof)
     }
 
-    // add here CRS
-    // pub fn verify_poly(commitment: Self, coefficients: &[G1], value_powers: &Vec<Fr>) -> bool {
-    //     let mut result = G1::zero();
+    pub fn verify_poly(commitment: Self, coefficients: &[G1], value_powers: &Vec<Fr>) -> bool {
+        let mut res: ark_ec::short_weierstrass::Affine<ark_bn254::g1::Config> = G1::zero();
 
-    //     for (i, coefficient) in coefficients.iter().enumerate() {
-    //         let power = value_powers[i];
-    //         result += *coefficient * &power;
-    //     }
+        for (i, coefficient) in coefficients.iter().enumerate() {
+            let power = value_powers[i];
+            let result: ark_ec::short_weierstrass::Affine<ark_bn254::g1::Config> =
+                (*coefficient * &power).into_affine();
+            res = (res + result).into_affine()
+        }
 
-    //     commitment.point == result
-    // }
+        commitment.point == res
+    }
 
     pub fn verify_witness(commitment: Self, proof: KZGProof) -> bool {
         proof.verify(commitment.point)
