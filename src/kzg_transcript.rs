@@ -8,6 +8,7 @@ use rand::Rng;
 
 // Entity that represents a random value that is calculated as a result of trusted setup.
 // It chould be generated using MPC
+#[derive(Copy, Clone)]
 pub struct CRS {
     pub value: Fr,
 }
@@ -65,13 +66,20 @@ impl KZGProof {
         }
     }
 
+    // TODO
+    pub fn prove(numerator: G1, denominator: G2, witness: G1) -> Self {
+        KZGProof {
+            numerator,
+            denominator,
+            witness,
+        }
+    }
+
     // The proof verification for one point: e(q(x)1, [x-x']2) == e([p(x)-p(x')]1, G2)
     // The proof verification for several points: e(q(x)1, [Z(x)]2) == e([p(x)-I(x)]1, G2)
     pub fn verify(&self, commitment: G1) -> bool {
         let left = Bn254::pairing(self.witness, self.denominator);
         let right = Bn254::pairing(commitment - self.numerator, G2::generator());
-        println!("witness {:?}", self.witness);
-        println!("denominator {:?}", self.denominator);
 
         left == right
     }

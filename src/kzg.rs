@@ -75,7 +75,7 @@ mod tests {
 
     #[test]
     fn full_cycle_test() {
-        let point = CRS::new(Fr::from(10));
+        let point = CRS::new(Fr::from(13));
         // let max_degree = 2;
 
         let points = vec![
@@ -83,13 +83,31 @@ mod tests {
             ElPoint::new(Fr::from(2), Fr::from(3)),
             ElPoint::new(Fr::from(3), Fr::from(5)),
         ];
+        let points_for_check = vec![ElPoint::new(Fr::from(1), Fr::from(9))];
 
-        let points_for_check = vec![ElPoint::new(Fr::from(1), Fr::from(244444))];
         let commitment_coeff = el_lagrange_interpolation(&points);
 
         let (commitment, proof) =
-            KZGCommitment::commit_poly(&commitment_coeff, point, &points_for_check);
-        assert!(KZGCommitment::verify_witness(commitment, proof));
+            KZGCommitment::commit_poly(&commitment_coeff, point.clone(), &points_for_check);
+
+        // Verifier part
+        let numerator_coeffs = el_lagrange_interpolation(&points_for_check);
+        let numerator_poly = DensePolynomial::from_coefficients_vec(numerator_coeffs.to_vec());
+        let numerator_raw = numerator_poly.evaluate(&point.value);
+        println!("numerator_raw {:?}", numerator_raw.to_string());
+        let numerator: ark_ec::short_weierstrass::Affine<ark_bn254::g1::Config> =
+            (G1::generator() * numerator_raw).into();
+
+        let zero_points: Vec<Fr> = points_for_check.iter().map(|point| point.x).collect();
+        let denominator_coeffs = calculate_zero_poly_coefficients(&zero_points);
+        let denominator_poly = DensePolynomial::from_coefficients_vec(denominator_coeffs.to_vec());
+        let denominator_raw = denominator_poly.evaluate(&point.value);
+        println!("denominator_raw {:?}", denominator_raw.to_string());
+        let denominator: ark_ec::short_weierstrass::Affine<ark_bn254::g2::Config> =
+            (G2::generator() * denominator_raw).into();
+
+        let verifier_proof = KZGProof::new(numerator, denominator, proof.witness);
+        assert!(KZGCommitment::verify_witness(commitment, verifier_proof));
     }
 
     #[test]

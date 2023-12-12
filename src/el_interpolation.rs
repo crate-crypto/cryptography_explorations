@@ -4,6 +4,7 @@ use ark_poly::DenseUVPolynomial;
 use ark_std::{One, Zero};
 use std::ops::Mul;
 
+// TODO: For now it's just simpler to use it in this way, but it should be fixed in the future
 #[derive(Debug, Clone, Copy)]
 pub struct ElPoint {
     pub x: Fr,
