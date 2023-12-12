@@ -1,5 +1,5 @@
 [package]
-name = "interpolation_on_bn254"
+name = "cryptography_exploration"
 version = "0.1.0"
 edition = "2021"
 
@@ -15,4 +15,7 @@ ark-poly-commit = "0.4.0"
 rand = "0.8.5"
 ark-ff = "0.4.2"
 ark-test-curves = "0.4.2"
-ark-bls12-381 = "0.4.0"
+
+ark-serialize = "0.4.2"
+blake3 = "1.5.0"
+blake2 = "0.10.6"
