@@ -78,7 +78,7 @@ pub struct Commitment<C: Group> {
     group: PhantomData<C>,
 }
 
-// TODO: Think on how to make it faster if possible 
+// TODO: Think on how to make it faster if possible
 // TODO: It's possible to use bitvec here: https://github.com/ferrilab/bitvec
 fn left_pad_bytes(input: &[u8], length: usize, padding_byte: u8) -> Vec<u8> {
     let padding_len = length.saturating_sub(input.len());
