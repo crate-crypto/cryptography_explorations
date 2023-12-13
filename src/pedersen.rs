@@ -78,7 +78,7 @@ pub struct Commitment<C: Group> {
     group: PhantomData<C>,
 }
 
-// TODO: Think on how to make it faster if possible 
+// TODO: Think on how to make it faster if possible
 // TODO: It's possible to use bitvec here: https://github.com/ferrilab/bitvec
 fn left_pad_bytes(input: &[u8], length: usize, padding_byte: u8) -> Vec<u8> {
     let padding_len = length.saturating_sub(input.len());
@@ -127,7 +127,7 @@ pub fn pedersen_commit(input: &[Vec<u8>], mut rng: ThreadRng) -> Result<G1, Box<
     let r: Fr = Fr::rand(&mut rng);
 
     if input.len().is_zero() {
-        return Err("The array is empty")?;
+        return Err("The array is empty".into());
     }
 
     let input_padded: Vec<[u8; N]> = transform_to_array_slice(input).unwrap();
