@@ -1,6 +1,7 @@
 use crate::el_interpolation::calculate_witness_poly;
 use crate::el_interpolation::calculate_zero_poly_coefficients;
 use crate::el_interpolation::el_lagrange_interpolation;
+use crate::el_interpolation::ElPoint;
 use ark_bn254::{Bn254, Fr, G1Projective as G1, G2Projective as G2};
 use ark_ec::pairing::Pairing;
 use ark_ec::Group;
@@ -11,14 +12,13 @@ use ark_poly::Polynomial;
 use ark_std::UniformRand;
 use rand::Rng;
 
-use crate::el_interpolation::ElPoint;
-
 // TODO: GPU Fast Fourier Transform and Multiexponentiation:
 // https://docs.rs/ec-gpu-gen/latest/ec_gpu_gen/
 // https://github.com/filecoin-project/bellperson/blob/master/src/gpu/multiexp.rs
 
 // Entity that represents a random value that is calculated as a result of trusted setup.
 // It could be generated using MPC
+//FIXME - Insecure, should be used only for testing
 #[derive(Copy, Clone)]
 pub struct CRS {
     pub value: Fr,

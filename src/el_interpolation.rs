@@ -17,6 +17,7 @@ impl ElPoint {
         ElPoint { x, y }
     }
 }
+
 pub fn el_lagrange_interpolation(points: &[ElPoint]) -> Vec<ark_bn254::Fr> {
     let mut result_polynomial = vec![ark_bn254::Fr::zero(); points.len()];
     let mut temp_polynomial = Vec::with_capacity(points.len());
@@ -48,6 +49,32 @@ pub fn el_lagrange_interpolation(points: &[ElPoint]) -> Vec<ark_bn254::Fr> {
     }
 
     result_polynomial.iter().copied().rev().collect()
+}
+
+pub fn barycentric_interpolation(points: &[ElPoint], x_coordinate: Fr) -> Fr {
+    let mut numerator = Fr::zero();
+    let mut denominator = Fr::zero();
+
+    for point in points {
+        let w = barycentric_weight(points, x_coordinate, point.x);
+        numerator += point.y * w;
+        denominator += w;
+    }
+
+    numerator / denominator
+}
+
+fn barycentric_weight(points: &[ElPoint], x: Fr, xi: Fr) -> Fr {
+    let mut weight = Fr::one();
+
+    for point in points {
+        if point.x != xi {
+            weight *= x - point.x;
+            weight /= xi - point.x;
+        }
+    }
+
+    weight
 }
 
 pub fn calculate_zero_poly_coefficients(roots: &[Fr]) -> Vec<Fr> {
