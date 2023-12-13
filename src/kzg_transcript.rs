@@ -1,8 +1,7 @@
 use crate::el_interpolation::calculate_witness_poly;
 use crate::el_interpolation::calculate_zero_poly_coefficients;
 use crate::el_interpolation::el_lagrange_interpolation;
-use ark_bn254::Bn254;
-use ark_bn254::{Fr, G1Projective as G1, G2Projective as G2};
+use ark_bn254::{Bn254, Fr, G1Projective as G1, G2Projective as G2};
 use ark_ec::pairing::Pairing;
 use ark_ec::Group;
 use ark_ff::Field;
@@ -14,6 +13,10 @@ use rand::Rng;
 
 use crate::el_interpolation::ElPoint;
 
+// TODO: GPU Fast Fourier Transform and Multiexponentiation:
+// https://docs.rs/ec-gpu-gen/latest/ec_gpu_gen/
+// https://github.com/filecoin-project/bellperson/blob/master/src/gpu/multiexp.rs
+
 // Entity that represents a random value that is calculated as a result of trusted setup.
 // It could be generated using MPC
 #[derive(Copy, Clone)]
@@ -23,18 +26,21 @@ pub struct CRS {
 
 impl CRS {
     // TODO: somewhere here an MPC protocol could be described or a Fiat-Shamir transform could be used
+    //FIXME - Insecure, should be used only for testing
     pub fn new(value: Fr) -> Self {
         Self { value }
     }
 
     // Returns a structure with random value
+    //FIXME - Insecure, should be used only for testing
     pub fn new_rand<R: Rng>(rng: &mut R) -> Self {
         Self {
             value: Fr::rand(rng),
         }
     }
 
-    // Calculates a powers of the value
+    // Calculates a powers of the value.
+    //FIXME - Insecure, should be used only for testing
     pub fn calc_powers(&self, max_degree: usize) -> Vec<Fr> {
         let mut powers = Vec::with_capacity(max_degree + 1);
         for i in 0..=max_degree {
@@ -57,7 +63,6 @@ impl KZGParams {
 
 #[derive(Debug)]
 pub struct KZGProof {
-    pub commitment: G1,
     // I(X) - polynomial that passes through desired points for the check (zero at y)
     pub numerator: G1,
     // Z(X) - zero polynomial that has zeroes at xi (zeroes at x)
@@ -67,9 +72,8 @@ pub struct KZGProof {
 }
 
 impl KZGProof {
-    pub fn new(commitment: G1, numerator: G1, denominator: G2, witness: G1) -> Self {
+    pub fn new(numerator: G1, denominator: G2, witness: G1) -> Self {
         KZGProof {
-            commitment,
             numerator,
             denominator,
             witness,
@@ -77,13 +81,8 @@ impl KZGProof {
     }
 
     // Prove function that follows the KZG procedure
-    pub fn prove(crs: &CRS, commit_to: &[ElPoint], witness_to: &[ElPoint]) -> Self {
+    pub fn prove(crs: &CRS, commit_poly: DensePolynomial<Fr>, witness_to: &[ElPoint]) -> Self {
         // let powers = crs.calc_powers(commit_to.len());
-
-        // NOTE: I checked that this commitment is generated correctly
-        let commit_coeffs = el_lagrange_interpolation(commit_to);
-        let commit_poly = DensePolynomial::from_coefficients_vec(commit_coeffs);
-        let commitment = G1::generator() * commit_poly.evaluate(&crs.value);
 
         let i_coeffs = el_lagrange_interpolation(witness_to);
         let i_poly = DensePolynomial::from_coefficients_vec(i_coeffs);
@@ -99,7 +98,6 @@ impl KZGProof {
         let witness = G1::generator() * witness_poly.evaluate(&crs.value);
 
         KZGProof {
-            commitment,
             numerator,
             denominator,
             witness,
@@ -108,9 +106,10 @@ impl KZGProof {
 
     // The proof verification for one point: e(q(x)1, [x-x']2) == e([p(x)-p(x')]1, G2)
     // The proof verification for several points: e(q(x)1, [Z(x)]2) == e([p(x)-I(x)]1, G2)
-    pub fn verify(&self) -> bool {
+    //FIXME - Insecure, there should be check that the numerator and denumerator are calculated correctly
+    pub fn verify(&self, commitment: G1) -> bool {
         let left = Bn254::pairing(self.witness, self.denominator);
-        let right = Bn254::pairing(self.commitment - self.numerator, G2::generator());
+        let right = Bn254::pairing(commitment - self.numerator, G2::generator());
 
         left == right
     }
@@ -151,9 +150,13 @@ mod tests {
             ElPoint::new(Fr::from(2), Fr::from(3)),
         ];
 
-        let proof = KZGProof::prove(&crs, &commit_to, &witness_to);
+        let commit_coeffs = el_lagrange_interpolation(&commit_to);
+        let commit_poly = DensePolynomial::from_coefficients_vec(commit_coeffs);
+        let commitment = G1::generator() * commit_poly.evaluate(&crs.value);
 
-        assert!(proof.verify());
+        let proof = KZGProof::prove(&crs, commit_poly, &witness_to);
+
+        assert!(proof.verify(commitment));
     }
 
     #[test]
@@ -171,9 +174,13 @@ mod tests {
             ElPoint::new(Fr::from(3), Fr::from(5)),
         ];
 
-        let proof = KZGProof::prove(&crs, &commit_to, &witness_to);
+        let commit_coeffs = el_lagrange_interpolation(&commit_to);
+        let commit_poly = DensePolynomial::from_coefficients_vec(commit_coeffs);
+        let commitment = G1::generator() * commit_poly.evaluate(&crs.value);
 
-        assert!(proof.verify());
+        let proof = KZGProof::prove(&crs, commit_poly, &witness_to);
+
+        assert!(proof.verify(commitment));
     }
 
     #[test]
@@ -184,13 +191,12 @@ mod tests {
         let witness = G1::zero();
 
         let proof = KZGProof {
-            commitment,
             numerator,
             denominator,
             witness,
         };
 
-        assert!(proof.verify());
+        assert!(proof.verify(commitment));
     }
 
     #[test]
@@ -202,12 +208,11 @@ mod tests {
         let witness = G1::rand(&mut rng);
 
         let proof = KZGProof {
-            commitment,
             numerator,
             denominator,
             witness,
         };
 
-        assert!(!proof.verify());
+        assert!(!proof.verify(commitment));
     }
 }
