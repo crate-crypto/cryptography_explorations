@@ -127,7 +127,7 @@ pub fn pedersen_commit(input: &[Vec<u8>], mut rng: ThreadRng) -> Result<G1, Box<
     let r: Fr = Fr::rand(&mut rng);
 
     if input.len().is_zero() {
-        return Err("The array is empty")?;
+        return Err("The array is empty".into());
     }
 
     let input_padded: Vec<[u8; N]> = transform_to_array_slice(input).unwrap();
