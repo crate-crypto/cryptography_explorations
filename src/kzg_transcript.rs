@@ -1,20 +1,16 @@
+use crate::el_interpolation::calculate_witness_poly;
 use crate::el_interpolation::calculate_zero_poly_coefficients;
 use crate::el_interpolation::el_lagrange_interpolation;
-use crate::DensePolynomial;
 use ark_bn254::Bn254;
-use ark_bn254::{Fr, G1Affine as G1, G2Affine as G2};
+use ark_bn254::{Fr, G1Projective as G1, G2Projective as G2};
 use ark_ec::pairing::Pairing;
-use ark_ec::AffineRepr;
-use ark_ec::CurveGroup;
+use ark_ec::Group;
 use ark_ff::Field;
-use ark_ff::Zero;
-use ark_poly::univariate::SparsePolynomial;
+use ark_poly::univariate::DensePolynomial;
 use ark_poly::DenseUVPolynomial;
 use ark_poly::Polynomial;
 use ark_std::UniformRand;
 use rand::Rng;
-use std::collections::HashMap;
-use std::ops::SubAssign;
 
 use crate::el_interpolation::ElPoint;
 
@@ -82,40 +78,25 @@ impl KZGProof {
 
     // Prove function that follows the KZG procedure
     pub fn prove(crs: &CRS, commit_to: &[ElPoint], witness_to: &[ElPoint]) -> Self {
-        let powers = crs.calc_powers(commit_to.len());
+        // let powers = crs.calc_powers(commit_to.len());
 
         // NOTE: I checked that this commitment is generated correctly
         let commit_coeffs = el_lagrange_interpolation(commit_to);
         let commit_poly = DensePolynomial::from_coefficients_vec(commit_coeffs);
-        let commitment = (G1::generator() * commit_poly.evaluate(&crs.value)).into_affine();
+        let commitment = G1::generator() * commit_poly.evaluate(&crs.value);
 
         let i_coeffs = el_lagrange_interpolation(witness_to);
         let i_poly = DensePolynomial::from_coefficients_vec(i_coeffs);
-        let numerator = (G1::generator() * i_poly.evaluate(&crs.value)).into_affine();
+        let numerator = G1::generator() * i_poly.evaluate(&crs.value);
 
         // NOTE: I checked that this zero polynomial is generated correctly
         let zero_points: Vec<Fr> = witness_to.iter().map(|point| point.x).collect();
         let z_coeffs = calculate_zero_poly_coefficients(&zero_points);
         let z_poly = DensePolynomial::from_coefficients_vec(z_coeffs);
-        let denominator = (G2::generator() * z_poly.evaluate(&crs.value)).into_affine();
+        let denominator = G2::generator() * z_poly.evaluate(&crs.value);
 
-        // NOTE: I checked that this witness polynomial is generated correctly
-        let filtered_witness_to: Vec<ElPoint> = commit_to
-            .iter()
-            .filter(|point| !witness_to.contains(point))
-            .cloned()
-            .collect();
-        let witness_coeff = el_lagrange_interpolation(&filtered_witness_to);
-        let witness_poly = DensePolynomial::from_coefficients_vec(witness_coeff);
-        let witness = (G1::generator() * witness_poly.evaluate(&crs.value)).into_affine();
-
-        let left = Bn254::pairing(witness, denominator);
-        let right = Bn254::pairing((commitment - numerator).into_affine(), G2::generator());
-
-        println!("{:#?}", left);
-        println!("{:#?}", right);
-
-        println!("{:#?}", left == right);
+        let witness_poly = calculate_witness_poly(&commit_poly, &i_poly, &z_poly);
+        let witness = G1::generator() * witness_poly.evaluate(&crs.value);
 
         KZGProof {
             commitment,
@@ -139,6 +120,7 @@ impl KZGProof {
 mod tests {
     use super::*;
     use ark_std::One;
+    use ark_std::Zero;
 
     #[test]
     fn test_fr_calc_powers() {
@@ -156,7 +138,6 @@ mod tests {
     }
 
     #[test]
-    // TODO: make up a test case
     fn test_kzg_proof_verify_valid() {
         let crs = CRS::new(Fr::from(5));
 

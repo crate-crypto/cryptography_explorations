@@ -1,8 +1,8 @@
 use ark_bn254::Fr;
-use ark_ff::Field;
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::DenseUVPolynomial;
 use ark_std::{One, Zero};
+use std::ops::Div;
 use std::ops::Mul;
 
 // TODO: For now it's just simpler to use it in this way, but it should be fixed in the future
@@ -71,16 +71,28 @@ pub fn calculate_zero_poly_coefficients(roots: &[Fr]) -> Vec<Fr> {
     coefficients.iter().copied().rev().collect()
 }
 
-pub fn dense_to_sparse<F: Zero + PartialEq + Clone>(coefficients: &[F]) -> Vec<(usize, F)> {
+pub fn dense_to_sparse<F>(coefficients: &[F]) -> Vec<(usize, F)>
+where
+    F: Zero + PartialEq + Clone,
+{
     let mut sparse_coeffs = Vec::new();
 
-    for (degree, &ref coefficient) in coefficients.iter().enumerate() {
-        if *coefficient != F::zero() {
+    for (degree, coefficient) in coefficients.iter().enumerate() {
+        if coefficient != &F::zero() {
             sparse_coeffs.push((degree, coefficient.clone()));
         }
     }
 
     sparse_coeffs
+}
+
+pub fn calculate_witness_poly(
+    commit_poly: &DensePolynomial<Fr>,
+    numerator_poly: &DensePolynomial<Fr>,
+    denominator_poly: &DensePolynomial<Fr>,
+) -> DensePolynomial<Fr> {
+    let diff_poly = commit_poly - numerator_poly;
+    diff_poly.div(denominator_poly)
 }
 
 #[cfg(test)]
@@ -139,5 +151,19 @@ mod tests {
         let expected_coefficients = vec![Fr::from(-6), Fr::from(11), Fr::from(-6), Fr::from(1)];
         let coefficients = calculate_zero_poly_coefficients(&roots);
         assert_eq!(coefficients, expected_coefficients);
+    }
+
+    #[test]
+    fn test_dense_to_sparse_empty() {
+        let coefficients: [i32; 0] = [];
+        let expected: Vec<(usize, i32)> = vec![];
+        assert_eq!(dense_to_sparse(&coefficients), expected);
+    }
+
+    #[test]
+    fn test_dense_to_sparse_non_empty() {
+        let coefficients = [0, 2, 0, 4, 0];
+        let expected = vec![(1, 2), (3, 4)];
+        assert_eq!(dense_to_sparse(&coefficients), expected);
     }
 }

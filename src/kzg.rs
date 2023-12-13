@@ -49,7 +49,7 @@
 //         let witness_raw = (commitment_raw - numerator_raw) / denominator_raw;
 //         let witness: ark_ec::short_weierstrass::Affine<ark_bn254::g1::Config> =
 //             (G1::generator() * witness_raw).into();
-//         let proof = KZGProof::new(numerator, denominator, witness);
+//         let proof = KZGProof::prove(numerator, denominator, witness);
 //         println!("witness: {:?}", witness_raw.to_string());
 
 //         (KZGCommitment { point: commitment }, proof)
