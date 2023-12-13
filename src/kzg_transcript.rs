@@ -1,13 +1,25 @@
+use crate::el_interpolation::calculate_zero_poly_coefficients;
+use crate::el_interpolation::el_lagrange_interpolation;
+use crate::DensePolynomial;
 use ark_bn254::Bn254;
 use ark_bn254::{Fr, G1Affine as G1, G2Affine as G2};
 use ark_ec::pairing::Pairing;
 use ark_ec::AffineRepr;
+use ark_ec::CurveGroup;
 use ark_ff::Field;
+use ark_ff::Zero;
+use ark_poly::univariate::SparsePolynomial;
+use ark_poly::DenseUVPolynomial;
+use ark_poly::Polynomial;
 use ark_std::UniformRand;
 use rand::Rng;
+use std::collections::HashMap;
+use std::ops::SubAssign;
+
+use crate::el_interpolation::ElPoint;
 
 // Entity that represents a random value that is calculated as a result of trusted setup.
-// It chould be generated using MPC
+// It could be generated using MPC
 #[derive(Copy, Clone)]
 pub struct CRS {
     pub value: Fr,
@@ -49,6 +61,7 @@ impl KZGParams {
 
 #[derive(Debug)]
 pub struct KZGProof {
+    pub commitment: G1,
     // I(X) - polynomial that passes through desired points for the check (zero at y)
     pub numerator: G1,
     // Z(X) - zero polynomial that has zeroes at xi (zeroes at x)
@@ -58,17 +71,54 @@ pub struct KZGProof {
 }
 
 impl KZGProof {
-    pub fn new(numerator: G1, denominator: G2, witness: G1) -> Self {
+    pub fn new(commitment: G1, numerator: G1, denominator: G2, witness: G1) -> Self {
         KZGProof {
+            commitment,
             numerator,
             denominator,
             witness,
         }
     }
 
-    // TODO
-    pub fn prove(numerator: G1, denominator: G2, witness: G1) -> Self {
+    // Prove function that follows the KZG procedure
+    pub fn prove(crs: &CRS, commit_to: &[ElPoint], witness_to: &[ElPoint]) -> Self {
+        let powers = crs.calc_powers(commit_to.len());
+
+        // NOTE: I checked that this commitment is generated correctly
+        let commit_coeffs = el_lagrange_interpolation(commit_to);
+        let commit_poly = DensePolynomial::from_coefficients_vec(commit_coeffs);
+        let commitment = (G1::generator() * commit_poly.evaluate(&crs.value)).into_affine();
+
+        let i_coeffs = el_lagrange_interpolation(witness_to);
+        let i_poly = DensePolynomial::from_coefficients_vec(i_coeffs);
+        let numerator = (G1::generator() * i_poly.evaluate(&crs.value)).into_affine();
+
+        // NOTE: I checked that this zero polynomial is generated correctly
+        let zero_points: Vec<Fr> = witness_to.iter().map(|point| point.x).collect();
+        let z_coeffs = calculate_zero_poly_coefficients(&zero_points);
+        let z_poly = DensePolynomial::from_coefficients_vec(z_coeffs);
+        let denominator = (G2::generator() * z_poly.evaluate(&crs.value)).into_affine();
+
+        // NOTE: I checked that this witness polynomial is generated correctly
+        let filtered_witness_to: Vec<ElPoint> = commit_to
+            .iter()
+            .filter(|point| !witness_to.contains(point))
+            .cloned()
+            .collect();
+        let witness_coeff = el_lagrange_interpolation(&filtered_witness_to);
+        let witness_poly = DensePolynomial::from_coefficients_vec(witness_coeff);
+        let witness = (G1::generator() * witness_poly.evaluate(&crs.value)).into_affine();
+
+        let left = Bn254::pairing(witness, denominator);
+        let right = Bn254::pairing((commitment - numerator).into_affine(), G2::generator());
+
+        println!("{:#?}", left);
+        println!("{:#?}", right);
+
+        println!("{:#?}", left == right);
+
         KZGProof {
+            commitment,
             numerator,
             denominator,
             witness,
@@ -77,9 +127,9 @@ impl KZGProof {
 
     // The proof verification for one point: e(q(x)1, [x-x']2) == e([p(x)-p(x')]1, G2)
     // The proof verification for several points: e(q(x)1, [Z(x)]2) == e([p(x)-I(x)]1, G2)
-    pub fn verify(&self, commitment: G1) -> bool {
+    pub fn verify(&self) -> bool {
         let left = Bn254::pairing(self.witness, self.denominator);
-        let right = Bn254::pairing(commitment - self.numerator, G2::generator());
+        let right = Bn254::pairing(self.commitment - self.numerator, G2::generator());
 
         left == right
     }
@@ -108,18 +158,58 @@ mod tests {
     #[test]
     // TODO: make up a test case
     fn test_kzg_proof_verify_valid() {
-        // let commitment = G1::rand(&mut rng);
-        // let numerator = G1::rand(&mut rng);
-        // let denominator = G2::rand(&mut rng);
-        // let witness = G1::rand(&mut rng);
+        let crs = CRS::new(Fr::from(5));
 
-        // let proof = KZGProof {
-        //     numerator,
-        //     denominator,
-        //     witness,
-        // };
+        let commit_to = vec![
+            ElPoint::new(Fr::from(1), Fr::from(2)),
+            ElPoint::new(Fr::from(2), Fr::from(3)),
+            ElPoint::new(Fr::from(3), Fr::from(5)),
+        ];
+        let witness_to = vec![
+            ElPoint::new(Fr::from(1), Fr::from(2)),
+            ElPoint::new(Fr::from(2), Fr::from(3)),
+        ];
 
-        // assert!(!proof.verify(commitment));
+        let proof = KZGProof::prove(&crs, &commit_to, &witness_to);
+
+        assert!(proof.verify());
+    }
+
+    #[test]
+    fn test_kzg_proof_verify_valid_commit_and_witness_equals() {
+        let crs = CRS::new(Fr::from(13));
+
+        let commit_to = vec![
+            ElPoint::new(Fr::from(1), Fr::from(2)),
+            ElPoint::new(Fr::from(2), Fr::from(3)),
+            ElPoint::new(Fr::from(3), Fr::from(5)),
+        ];
+        let witness_to = vec![
+            ElPoint::new(Fr::from(1), Fr::from(2)),
+            ElPoint::new(Fr::from(2), Fr::from(3)),
+            ElPoint::new(Fr::from(3), Fr::from(5)),
+        ];
+
+        let proof = KZGProof::prove(&crs, &commit_to, &witness_to);
+
+        assert!(proof.verify());
+    }
+
+    #[test]
+    fn test_kzg_proof_verify_valid_zero() {
+        let commitment = G1::zero();
+        let numerator = G1::zero();
+        let denominator = G2::zero();
+        let witness = G1::zero();
+
+        let proof = KZGProof {
+            commitment,
+            numerator,
+            denominator,
+            witness,
+        };
+
+        assert!(proof.verify());
     }
 
     #[test]
@@ -131,11 +221,12 @@ mod tests {
         let witness = G1::rand(&mut rng);
 
         let proof = KZGProof {
+            commitment,
             numerator,
             denominator,
             witness,
         };
 
-        assert!(!proof.verify(commitment));
+        assert!(!proof.verify());
     }
 }
