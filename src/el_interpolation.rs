@@ -51,6 +51,24 @@ pub fn el_lagrange_interpolation(points: &[ElPoint]) -> Vec<ark_bn254::Fr> {
     result_polynomial.iter().copied().rev().collect()
 }
 
+// pub fn el_barycentric_interpolation(points: &[ElPoint], x_coordinate: Fr) -> G1 {
+//     let domain = EvaluationDomain::<Fr>::from_vec(points.iter().map(|p| p.x).collect());
+
+//     let mut evals = Vec::with_capacity(points.len());
+//     for point in points {
+//         evals.push(point.y);
+//     }
+
+//     let bary_weights = domain.compute_barycentric_weights(x_coordinate);
+
+//     let mut result = G1::zero();
+//     for (weight, eval) in bary_weights.iter().zip(evals.iter()) {
+//         result += eval * weight;
+//     }
+
+//     result
+// }
+
 pub fn barycentric_interpolation(points: &[ElPoint], x_coordinate: Fr) -> Fr {
     let mut numerator = Fr::zero();
     let mut denominator = Fr::zero();

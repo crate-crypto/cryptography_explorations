@@ -14,6 +14,8 @@ ark-poly = "0.4.2"
 rand = "0.8.5"
 ark-ff = "0.4.2"
 ark-test-curves = "0.4.2"
+rustfft = "6.1.0"
+polynomen = "1.1.0"
 
 ark-serialize = "0.4.2"
 blake3 = "1.5.0"
