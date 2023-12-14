@@ -5,7 +5,7 @@ use ark_std::{One, Zero};
 use std::ops::Div;
 use std::ops::Mul;
 
-// TODO: For now it's just simpler to use it in this way, but it should be fixed in the future
+// TODO: For now it's just simpler to use intermediate structure, but probably it should be fixed in the future
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ElPoint {
     pub x: Fr,
@@ -50,24 +50,6 @@ pub fn el_lagrange_interpolation(points: &[ElPoint]) -> Vec<ark_bn254::Fr> {
 
     result_polynomial.iter().copied().rev().collect()
 }
-
-// pub fn el_barycentric_interpolation(points: &[ElPoint], x_coordinate: Fr) -> G1 {
-//     let domain = EvaluationDomain::<Fr>::from_vec(points.iter().map(|p| p.x).collect());
-
-//     let mut evals = Vec::with_capacity(points.len());
-//     for point in points {
-//         evals.push(point.y);
-//     }
-
-//     let bary_weights = domain.compute_barycentric_weights(x_coordinate);
-
-//     let mut result = G1::zero();
-//     for (weight, eval) in bary_weights.iter().zip(evals.iter()) {
-//         result += eval * weight;
-//     }
-
-//     result
-// }
 
 pub fn barycentric_interpolation(points: &[ElPoint], x_coordinate: Fr) -> Fr {
     let mut numerator = Fr::zero();
