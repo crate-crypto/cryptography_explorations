@@ -3,6 +3,7 @@ pub mod group;
 pub mod kzg;
 pub mod kzg_transcript;
 pub mod pedersen;
+pub mod toeplitz;
 
 use crate::el_interpolation::el_lagrange_interpolation;
 use crate::el_interpolation::ElPoint;
