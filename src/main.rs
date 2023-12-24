@@ -46,7 +46,7 @@ fn main() {
     // print!("{:#?}", mul1);
 
     let vec2 = Vector4::new(Fr::from(5), Fr::from(6), Fr::from(7), Fr::from(8));
-    // Multiplication happens 
+    // Multiplication happens
     let mat = Matrix4::new(
         Fr::from(1),
         Fr::from(4),

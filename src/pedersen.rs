@@ -79,7 +79,6 @@ pub struct Commitment<C: Group> {
 }
 
 // TODO: Think on how to make it faster if possible
-// TODO: It's possible to use bitvec here: https://github.com/ferrilab/bitvec
 fn left_pad_bytes(input: &[u8], length: usize, padding_byte: u8) -> Vec<u8> {
     let padding_len = length.saturating_sub(input.len());
     let mut padded = vec![padding_byte; padding_len];
@@ -174,24 +173,22 @@ mod tests {
     #[test]
     // Non-empty commit
     fn test_pedersen_commit() {
-        // Test case 1: Non-empty input
+        // Non-empty input
         let input1 = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]];
         let rng1 = rand::thread_rng();
         let commitment1 = pedersen_commit(&input1, rng1);
         assert!(!commitment1.unwrap().is_zero());
 
-        // Test case 2: Empty input
+        // Empty input
         let input2 = vec![];
         let rng2 = rand::thread_rng();
         let commitment2 = pedersen_commit(&input2, rng2);
         assert!(commitment2.is_err());
 
-        // Test case 3: Random input
+        // Random input
         let input3 = vec![vec![10, 20, 30], vec![40, 50, 60]];
         let rng3 = rand::thread_rng();
         let commitment3 = pedersen_commit(&input3, rng3);
         assert!(!commitment3.unwrap().is_zero());
-
-        // Add more test cases as needed
     }
 }
