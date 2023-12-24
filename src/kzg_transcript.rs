@@ -2,6 +2,7 @@ use crate::el_interpolation::calculate_witness_poly;
 use crate::el_interpolation::calculate_zero_poly_coefficients;
 use crate::el_interpolation::el_lagrange_interpolation;
 use crate::el_interpolation::ElPoint;
+use crate::toeplitz::ToeplitzMatrix;
 use ark_bn254::{Bn254, Fr, G1Projective as G1, G2Projective as G2};
 use ark_ec::pairing::Pairing;
 use ark_ec::Group;
@@ -10,6 +11,7 @@ use ark_poly::univariate::DensePolynomial;
 use ark_poly::DenseUVPolynomial;
 use ark_poly::Polynomial;
 use ark_std::UniformRand;
+use ark_std::Zero;
 use rand::Rng;
 
 // Entity that represents a random value that is calculated as a result of trusted setup.
@@ -81,6 +83,9 @@ pub struct KZGProof {
     // q(x)
     pub witness: G1,
 }
+use crate::GeneralEvaluationDomain;
+use ark_ff::FftField;
+use ark_poly::EvaluationDomain;
 
 impl KZGProof {
     pub fn new(numerator: G1, denominator: G2, witness: G1) -> Self {
@@ -129,6 +134,19 @@ impl KZGProof {
         let right = Bn254::pairing(commitment - self.numerator, G2::generator());
 
         left == right
+    }
+
+    pub fn calc_all_proofpoints(crs: &CRS, commit_to: &[ElPoint]) -> Vec<G1> {
+        let mut commit_coeffs = el_lagrange_interpolation(commit_to);
+        commit_coeffs.reverse();
+
+        // a vector that has the first coefficient from the commit_coeffs and all other values are Fr::zero()
+        let mut zeros = vec![Fr::zero(); commit_coeffs.len()];
+        zeros[0] = commit_coeffs[0];
+        let toeplitz = ToeplitzMatrix::new(commit_coeffs, zeros).unwrap();
+        let circulant = toeplitz.extend_to_circulant();
+        let hs = circulant.fast_multiply_by_vector(&crs.powers_g1).unwrap();
+        hs
     }
 }
 
@@ -239,5 +257,23 @@ mod tests {
         };
 
         assert!(!proof.verify(commitment));
+    }
+
+    #[test]
+    fn test_calc_all_proofpoints() {
+        // Sample CRS
+        let crs = CRS::new(Fr::from(6), 5);
+
+        // Sample commit_to vector
+        let commit_to = vec![
+            ElPoint::new(Fr::from(1), Fr::from(2)),
+            ElPoint::new(Fr::from(2), Fr::from(3)),
+            ElPoint::new(Fr::from(3), Fr::from(5)),
+        ];
+
+        // Calculate the proof points
+        let proof_points = KZGProof::calc_all_proofpoints(&crs, &commit_to);
+
+        println!("{:#?}", proof_points);
     }
 }
