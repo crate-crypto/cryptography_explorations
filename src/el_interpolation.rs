@@ -122,6 +122,8 @@ pub fn calculate_witness_poly(
     diff_poly.div(denominator_poly)
 }
 
+pub fn partial_fraction_decomposition() {}
+
 #[cfg(test)]
 mod tests {
     use super::*;

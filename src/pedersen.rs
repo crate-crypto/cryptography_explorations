@@ -1,8 +1,8 @@
 use ark_bn254::{Fr, G1Projective as G1};
 use ark_ec::Group;
+use ark_ff::PrimeField;
 use ark_std::UniformRand;
 use ark_std::Zero;
-use ark_test_curves::PrimeField;
 use rand::rngs::ThreadRng;
 use std::error::Error;
 use std::ops::Add;

@@ -1,21 +1,16 @@
-use crate::el_interpolation::calculate_witness_poly;
-use crate::el_interpolation::calculate_zero_poly_coefficients;
-use crate::el_interpolation::el_lagrange_interpolation;
-use crate::el_interpolation::ElPoint;
+use crate::el_interpolation::*;
 use crate::toeplitz::ToeplitzMatrix;
+use crate::GeneralEvaluationDomain;
 use ark_bn254::{Bn254, Fr, G1Projective as G1, G2Projective as G2};
-use ark_ec::pairing::Pairing;
-use ark_ec::Group;
-use ark_ff::Field;
-use ark_poly::univariate::DensePolynomial;
-use ark_poly::DenseUVPolynomial;
-use ark_poly::Polynomial;
-use ark_std::UniformRand;
-use ark_std::Zero;
+use ark_ec::{pairing::Pairing, Group};
+use ark_ff::{FftField, Field};
+use ark_poly::{
+    univariate::DensePolynomial, DenseUVPolynomial, EvaluationDomain, Evaluations, Polynomial,
+};
+use ark_std::{UniformRand, Zero};
 use rand::Rng;
 
 // Entity that represents a random value that is calculated as a result of trusted setup.
-// It could be generated using MPC
 #[derive(Clone)]
 pub struct CRS {
     pub powers_g1: Vec<G1>,
@@ -23,7 +18,7 @@ pub struct CRS {
 }
 
 impl CRS {
-    // FIXME - Insecure, should be used only for testing
+    // NOTE - Insecure, should be used only for testing
     pub fn new(value: Fr, max_degree: usize) -> Self {
         let value_powers = calc_powers(value, max_degree);
         let powers_g1 = value_powers
@@ -41,7 +36,7 @@ impl CRS {
     }
 
     // Returns a structure with random value
-    // FIXME - Insecure, should be used only for testing
+    // NOTE - Insecure, should be used only for testing
     pub fn new_rand<R: Rng>(rng: &mut R, max_degree: usize) -> Self {
         let value = Fr::rand(rng);
         let value_powers = calc_powers(value, max_degree);
@@ -74,6 +69,7 @@ pub fn calc_powers(value: Fr, max_degree: usize) -> Vec<Fr> {
     powers
 }
 
+// TODO: define another struct
 #[derive(Debug)]
 pub struct KZGProof {
     // I(X) - polynomial that passes through desired points for the check (zero at y)
@@ -83,9 +79,6 @@ pub struct KZGProof {
     // q(x)
     pub witness: G1,
 }
-use crate::GeneralEvaluationDomain;
-use ark_ff::FftField;
-use ark_poly::EvaluationDomain;
 
 impl KZGProof {
     pub fn new(numerator: G1, denominator: G2, witness: G1) -> Self {
@@ -96,21 +89,17 @@ impl KZGProof {
         }
     }
 
-    // Prove function that follows the KZG procedure
-    // FIXME: value: Fr is here only for testing purposes. Such a solution is not secure
+    // FIXME: value: Fr is here only for testing purposes. Such a solution is not secure. MSM should be used instead
     pub fn prove(
         _crs: &CRS,
         value: Fr,
         commit_poly: DensePolynomial<Fr>,
         witness_to: &[ElPoint],
     ) -> Self {
-        // let powers = crs.calc_powers(commit_to.len());
-
         let i_coeffs = el_lagrange_interpolation(witness_to);
         let i_poly = DensePolynomial::from_coefficients_vec(i_coeffs);
         let numerator = G1::generator() * i_poly.evaluate(&value);
 
-        // NOTE: I checked that this zero polynomial is generated correctly
         let zero_points: Vec<Fr> = witness_to.iter().map(|point| point.x).collect();
         let z_coeffs = calculate_zero_poly_coefficients(&zero_points);
         let z_poly = DensePolynomial::from_coefficients_vec(z_coeffs);
@@ -128,7 +117,7 @@ impl KZGProof {
 
     // The proof verification for one point: e(q(x)1, [x-x']2) == e([p(x)-p(x')]1, G2)
     // The proof verification for several points: e(q(x)1, [Z(x)]2) == e([p(x)-I(x)]1, G2)
-    //FIXME - Insecure, there should be check that the numerator and denumerator are calculated correctly
+    // FIXME - Insecure, there should be check that the numerator and denumerator are calculated correctly
     pub fn verify(&self, commitment: G1) -> bool {
         let left = Bn254::pairing(self.witness, self.denominator);
         let right = Bn254::pairing(commitment - self.numerator, G2::generator());
@@ -136,9 +125,24 @@ impl KZGProof {
         left == right
     }
 
-    pub fn calc_all_proofpoints(crs: &CRS, commit_to: &[ElPoint]) -> Vec<G1> {
-        let mut commit_coeffs = el_lagrange_interpolation(commit_to);
+    pub fn calc_all_proofpoints(crs: &CRS, evaluations: &[Fr]) -> Vec<G1> {
+        // The num_coeffs is equal to amount of evaluations
+        let domain: GeneralEvaluationDomain<Fr> =
+            GeneralEvaluationDomain::new(evaluations.len()).unwrap();
+        let evals = Evaluations::from_vec_and_domain(evaluations.to_vec(), domain);
+        let commit_poly = evals.interpolate();
+
+        // FIXME
+        let root_of_unity = Fr::get_root_of_unity(4).unwrap();
+        println!("root_of_unity: {:#?}", root_of_unity);
+        let calc = commit_poly.evaluate(&root_of_unity);
+        println!("calc: {:#?}", calc);
+
+        let mut commit_coeffs = commit_poly.coeffs;
+
+        // We need the reverse order to create a matrix
         commit_coeffs.reverse();
+        println!("commit_coeffs: {:?}", commit_coeffs);
 
         // a vector that has the first coefficient from the commit_coeffs and all other values are Fr::zero()
         let mut zeros = vec![Fr::zero(); commit_coeffs.len()];
@@ -146,7 +150,9 @@ impl KZGProof {
         let toeplitz = ToeplitzMatrix::new(commit_coeffs, zeros).unwrap();
         let circulant = toeplitz.extend_to_circulant();
         let hs = circulant.fast_multiply_by_vector(&crs.powers_g1).unwrap();
-        hs
+
+        // let hs = vec![G1::generator()];
+        domain.fft(&hs)
     }
 }
 
@@ -262,18 +268,16 @@ mod tests {
     #[test]
     fn test_calc_all_proofpoints() {
         // Sample CRS
-        let crs = CRS::new(Fr::from(6), 5);
+        let crs = CRS::new(Fr::from(8), 3);
 
         // Sample commit_to vector
-        let commit_to = vec![
-            ElPoint::new(Fr::from(1), Fr::from(2)),
-            ElPoint::new(Fr::from(2), Fr::from(3)),
-            ElPoint::new(Fr::from(3), Fr::from(5)),
-        ];
+        let evals = vec![Fr::from(1), Fr::from(2)];
 
         // Calculate the proof points
-        let proof_points = KZGProof::calc_all_proofpoints(&crs, &commit_to);
+        let proof_points = KZGProof::calc_all_proofpoints(&crs, &evals);
 
-        println!("{:#?}", proof_points);
+        println!("proof_points: {:#?}", proof_points);
+        // NOTE: the len is always even
+        assert_eq!(proof_points.len(), 2);
     }
 }

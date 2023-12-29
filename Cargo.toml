@@ -10,15 +10,10 @@ ark-std = "0.4.0"
 ark-bn254 = "0.4.0"
 ark-ec = "0.4.0"
 ark-poly = "0.4.2"
-
 rand = "0.8.5"
 ark-ff = "0.4.2"
-ark-test-curves = "0.4.2"
-rustfft = "6.1.0"
-polynomen = "1.1.0"
-nalgebra = "0.32.3"
 
-ark-serialize = "0.4.2"
-blake3 = "1.5.0"
-blake2 = "0.10.6"
+[dev-dependencies]
 criterion = "0.3.4"
+proptest = "1.4.0"
+nalgebra = "0.32.3"
