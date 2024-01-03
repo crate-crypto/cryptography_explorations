@@ -1,9 +1,9 @@
 use crate::el_interpolation::*;
 use crate::toeplitz::ToeplitzMatrix;
-use crate::GeneralEvaluationDomain;
 use ark_bn254::{Bn254, Fr, G1Projective as G1, G2Projective as G2};
 use ark_ec::{pairing::Pairing, Group};
 use ark_ff::{FftField, Field};
+use ark_poly::GeneralEvaluationDomain;
 use ark_poly::{
     univariate::DensePolynomial, DenseUVPolynomial, EvaluationDomain, Evaluations, Polynomial,
 };
@@ -149,7 +149,7 @@ impl KZGProof {
         zeros[0] = commit_coeffs[0];
         let toeplitz = ToeplitzMatrix::new(commit_coeffs, zeros).unwrap();
         let circulant = toeplitz.extend_to_circulant();
-        let hs = circulant.fast_multiply_by_vector(&crs.powers_g1).unwrap();
+        let hs = circulant.fast_multiply_by_vec(&crs.powers_g1).unwrap();
 
         // let hs = vec![G1::generator()];
         domain.fft(&hs)
