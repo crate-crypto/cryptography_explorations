@@ -24,7 +24,6 @@ impl KZGCommitment {
     // denominator - Z(X),
     // witness - q(x),
     // Proof: q(x) = (p(x) - I(x)) / Z(x)
-
     // TODO - value is here only for testing, delete it
     pub fn commit_poly(commit_to: &[ElPoint], _crs: &CRS, value: Fr) -> KZGCommitment {
         // NOTE: I checked that this commitment is generated correctly
@@ -35,13 +34,12 @@ impl KZGCommitment {
         KZGCommitment { point: commitment }
     }
 
-    // TODO - value_powers is here only for testing, delete it
-    pub fn verify_poly(commitment: Self, coefficients: &[G1], value_powers: &[Fr]) -> bool {
+    pub fn verify_poly(commitment: Self, coefficients: &[Fr], value_powers: &[G1]) -> bool {
         let mut res = G1::zero();
 
         for (i, coefficient) in coefficients.iter().enumerate() {
             let power = value_powers[i];
-            let result = *coefficient * power;
+            let result = power * *coefficient;
             res += result
         }
 
@@ -72,13 +70,21 @@ mod tests {
         let value = Fr::from(1423);
         let crs = CRS::new(value, max_degree);
 
+        // Commit to poly
         let commit_coeff = el_lagrange_interpolation(&commit_to);
         let commit_poly = DensePolynomial::from_coefficients_vec(commit_coeff.to_vec());
-
         let commitment = KZGCommitment::commit_poly(&commit_to, &crs, value);
+        // Generate proof
         let proof = KZGProof::prove(&crs, value, commit_poly, &witness_to);
 
-        // Verifier part
+        // Verify polynomial
+        assert!(KZGCommitment::verify_poly(
+            commitment,
+            &commit_coeff,
+            &crs.powers_g1
+        ));
+
+        // Verify proof
         let numerator_coeffs = el_lagrange_interpolation(&witness_to);
         let numerator_poly = DensePolynomial::from_coefficients_vec(numerator_coeffs.to_vec());
         let numerator_raw = numerator_poly.evaluate(&value);

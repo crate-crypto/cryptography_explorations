@@ -2,12 +2,12 @@ use crate::el_interpolation::*;
 use crate::toeplitz::ToeplitzMatrix;
 use ark_bn254::{Bn254, Fr, G1Projective as G1, G2Projective as G2};
 use ark_ec::{pairing::Pairing, Group};
-use ark_ff::{FftField, Field};
+use ark_ff::Field;
 use ark_poly::GeneralEvaluationDomain;
 use ark_poly::{
     univariate::DensePolynomial, DenseUVPolynomial, EvaluationDomain, Evaluations, Polynomial,
 };
-use ark_std::{UniformRand, Zero};
+use ark_std::UniformRand;
 use rand::Rng;
 
 // Entity that represents a random value that is calculated as a result of trusted setup.
@@ -58,9 +58,16 @@ impl CRS {
     pub fn mpc() {
         unimplemented!()
     }
+
+    pub fn get_g1(&self, len: usize) -> Vec<G1> {
+        self.powers_g1[..len].to_vec()
+    }
+    pub fn get_g2(&self, len: usize) -> Vec<G2> {
+        self.powers_g2[..len].to_vec()
+    }
 }
 
-// Calculates a powers of the value.
+// Calculates powers of the value.
 pub fn calc_powers(value: Fr, max_degree: usize) -> Vec<Fr> {
     let mut powers = Vec::with_capacity(max_degree + 1);
     for i in 0..=max_degree {
@@ -69,7 +76,6 @@ pub fn calc_powers(value: Fr, max_degree: usize) -> Vec<Fr> {
     powers
 }
 
-// TODO: define another struct
 #[derive(Debug)]
 pub struct KZGProof {
     // I(X) - polynomial that passes through desired points for the check (zero at y)
@@ -82,6 +88,25 @@ pub struct KZGProof {
 
 impl KZGProof {
     pub fn new(numerator: G1, denominator: G2, witness: G1) -> Self {
+        KZGProof {
+            numerator,
+            denominator,
+            witness,
+        }
+    }
+
+    // This function is for the verifier, so that he can build a proof using witness_to array, CRS and then check that it was generated correctly
+    // FIXME: value: Fr is here only for testing purposes. Such a solution is not secure. MSM should be used instead
+    pub fn new_with_witness(witness_to: &[ElPoint], value: Fr, witness: G1) -> Self {
+        let i_coeffs = el_lagrange_interpolation(witness_to);
+        let i_poly = DensePolynomial::from_coefficients_vec(i_coeffs);
+        let numerator = G1::generator() * i_poly.evaluate(&value);
+
+        let zero_points: Vec<Fr> = witness_to.iter().map(|point| point.x).collect();
+        let z_coeffs = calculate_zero_poly_coefficients(&zero_points);
+        let z_poly = DensePolynomial::from_coefficients_vec(z_coeffs);
+        let denominator = G2::generator() * z_poly.evaluate(&value);
+
         KZGProof {
             numerator,
             denominator,
@@ -126,17 +151,32 @@ impl KZGProof {
     }
 
     pub fn calc_all_proofpoints(crs: &CRS, evaluations: &[Fr]) -> Vec<G1> {
+        // let len = evaluations.len();
+        // // Check that evaluations is a power of 2
+        // // TODO: I should extend not Toeplitz, but a ready circulant(?)
+        // let evaluations = if !len.is_power_of_two() {
+        //     // Extend the evaluations vector with zeros
+        //     let new_len = len.next_power_of_two();
+        //     let mut extended_evaluations = Vec::with_capacity(new_len);
+        //     extended_evaluations.extend_from_slice(evaluations);
+        //     extended_evaluations.extend(vec![Fr::zero(); new_len - len]);
+        //     extended_evaluations
+        // } else {
+        //     evaluations.to_vec()
+        // };
+        // println!("evaluations: {:?}", evaluations);
+
         // The num_coeffs is equal to amount of evaluations
         let domain: GeneralEvaluationDomain<Fr> =
-            GeneralEvaluationDomain::new(evaluations.len()).unwrap();
+            GeneralEvaluationDomain::new(evaluations.len().next_power_of_two()).unwrap();
         let evals = Evaluations::from_vec_and_domain(evaluations.to_vec(), domain);
         let commit_poly = evals.interpolate();
 
-        // FIXME
-        let root_of_unity = Fr::get_root_of_unity(4).unwrap();
-        println!("root_of_unity: {:#?}", root_of_unity);
-        let calc = commit_poly.evaluate(&root_of_unity);
-        println!("calc: {:#?}", calc);
+        // // FIXME
+        // let root_of_unity = Fr::get_root_of_unity(1).unwrap();
+        // println!("root_of_unity: {:#?}", root_of_unity);
+        // let calc = commit_poly.evaluate(&root_of_unity);
+        // println!("calc: {:#?}", calc);
 
         let mut commit_coeffs = commit_poly.coeffs;
 
@@ -144,14 +184,12 @@ impl KZGProof {
         commit_coeffs.reverse();
         println!("commit_coeffs: {:?}", commit_coeffs);
 
-        // a vector that has the first coefficient from the commit_coeffs and all other values are Fr::zero()
-        let mut zeros = vec![Fr::zero(); commit_coeffs.len()];
-        zeros[0] = commit_coeffs[0];
-        let toeplitz = ToeplitzMatrix::new(commit_coeffs, zeros).unwrap();
+        let toeplitz = ToeplitzMatrix::new_with_coeffs(commit_coeffs).unwrap();
         let circulant = toeplitz.extend_to_circulant();
-        let hs = circulant.fast_multiply_by_vec(&crs.powers_g1).unwrap();
+        let hs = circulant
+            .fast_multiply_by_vec(&crs.get_g1(circulant.get_len()))
+            .unwrap();
 
-        // let hs = vec![G1::generator()];
         domain.fft(&hs)
     }
 }
@@ -201,9 +239,13 @@ mod tests {
         let commit_poly = DensePolynomial::from_coefficients_vec(commit_coeffs);
         let commitment = G1::generator() * commit_poly.evaluate(&value);
 
+        // Prover use case
         let proof = KZGProof::prove(&crs, value, commit_poly, &witness_to);
-
         assert!(proof.verify(commitment));
+
+        // Verifier use case
+        let verifier = KZGProof::new_with_witness(&witness_to, value, proof.witness);
+        assert!(verifier.verify(commitment));
     }
 
     #[test]
@@ -268,16 +310,23 @@ mod tests {
     #[test]
     fn test_calc_all_proofpoints() {
         // Sample CRS
-        let crs = CRS::new(Fr::from(8), 3);
+        let crs = CRS::new(Fr::from(8), 16);
 
-        // Sample commit_to vector
-        let evals = vec![Fr::from(1), Fr::from(2)];
+        // Evaluations for which the proofs would be generated
+        // NOTE: If we have for example 6 points -> we would get 8 proofs
+        let evals = vec![
+            Fr::from(1551), //- 1
+            Fr::from(2552), //- 8
+            Fr::from(3553), //- 4
+            Fr::from(4554), //-
+            Fr::from(5555), //- 2
+            Fr::from(6556), //-cc
+        ];
 
         // Calculate the proof points
         let proof_points = KZGProof::calc_all_proofpoints(&crs, &evals);
 
         println!("proof_points: {:#?}", proof_points);
-        // NOTE: the len is always even
-        assert_eq!(proof_points.len(), 2);
+        assert!(proof_points.len().is_power_of_two());
     }
 }

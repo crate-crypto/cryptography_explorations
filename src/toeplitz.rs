@@ -5,6 +5,9 @@ use ark_std::vec::Vec;
 use std::error::Error;
 use std::ops::Mul;
 
+// TODO: implement this function
+// pub fn extend_vec_to_pow_two()
+
 // TODO: Could be implemented with as a trait with supertrait Toeplitz
 #[derive(Debug)]
 pub struct CirculantMatrix<F> {
@@ -17,6 +20,10 @@ pub struct CirculantMatrix<F> {
 impl<F: Clone> CirculantMatrix<F> {
     pub fn new(vec_representation: Vec<F>) -> Self {
         CirculantMatrix { vec_representation }
+    }
+
+    pub fn get_len(&self) -> usize {
+        self.vec_representation.len()
     }
 
     pub fn get_matrix(&self) -> Vec<F> {
@@ -51,16 +58,16 @@ impl<F: FftField + std::ops::MulAssign<F>> CirculantMatrix<F> {
     {
         let matrix_len = self.vec_representation.len();
         // Check that the vector is the same length as the matrix
-        if matrix_len != vector.len() {
+        if matrix_len > vector.len() {
             return Err(format!(
-                "Vector lengths are not equal: matrix length = {}, vector length = {}",
+                "The matrix length is more than vector's: matrix length = {}, vector length = {}",
                 matrix_len,
                 vector.len()
             )
             .into());
         }
 
-        // TODO: check that I use domain in a correct way
+        // NOTE: If the domain is for example 12 then there would be 16 proofs (because it's the next power of 2):
         let domain: GeneralEvaluationDomain<F> = GeneralEvaluationDomain::new(matrix_len).unwrap();
 
         // y = FFT(s) - FFT(matrix)
@@ -74,17 +81,18 @@ impl<F: FftField + std::ops::MulAssign<F>> CirculantMatrix<F> {
         // TODO: it would be super to make pull request to the ark_poly with the polynomial
         // TODO: multiplication, so that it would be possible to multiply not only equal values
         // TODO: (Fr on Fr), but also Fr on G1
+        // NOTE: I found out that nalgebra crate works faster that my implementation
         // let u_evals = domain.mul_polynomials_in_evaluation_domain(&y, &v);
         let u_evals = hadamard_product(&y, &v).unwrap();
+
         let u = domain.ifft(&u_evals);
 
         Ok(u)
     }
 }
 
-// FIXME: probably this structure could be skipped and the circulant matrix could be formed directly in KZG struct
 pub struct ToeplitzMatrix<F: FftField> {
-    // FIXME: Such representation might be not efficient, because we need to inverse the first column
+    // NOTE: Such representation might be not efficient, because we need to inverse the first column
     // Matrix example:
     // a0   a-1  a-2  a-3
     // a1   a0   a-1  a-2
@@ -98,6 +106,9 @@ impl<F: FftField> ToeplitzMatrix<F> {
     pub fn new(first_row: Vec<F>, first_col: Vec<F>) -> Result<Self, Box<dyn Error>> {
         if first_row.len() != first_col.len() {
             return Err("First column and first row must have the same length".into());
+        }
+        if first_row.is_empty() || first_col.is_empty() {
+            return Err("First column and first row must contain values".into());
         }
 
         let first_elem_row = first_row.first().unwrap();
@@ -115,12 +126,16 @@ impl<F: FftField> ToeplitzMatrix<F> {
         })
     }
 
-    // a0   a-1  a-2  ...
-    // a1   a0   a-1  ...
-    // a2   a1   a0   ...
-    // ...
-    // first_row - a0 a-1 a-2 a-3
-    // first_col - a0 a1 a2 a3
+    // TODO: check that it works correctly
+    pub fn new_with_coeffs(coeffs: Vec<F>) -> Result<Self, Box<dyn Error>> {
+        let mut zeros = vec![F::zero(); coeffs.len()];
+        zeros[0] = coeffs[0];
+        Ok(ToeplitzMatrix {
+            first_row: coeffs,
+            first_col: zeros,
+        })
+    }
+
     pub fn get_matrix(&self) -> Vec<F> {
         let rows = self.first_row.len();
         let cols = self.first_col.len();
@@ -140,7 +155,7 @@ impl<F: FftField> ToeplitzMatrix<F> {
 
         full_matrix
     }
-    // a2N = [a0, ... , a-N-1, a0, aN-1, ..., a1]
+    // a2N = [a0, ... , a-N-1, a0, aN-1, ..., a1] - blocking factor = 2
     // https://alinush.github.io/2020/03/19/multiplying-a-vector-by-a-toeplitz-matrix.html
     pub fn extend_to_circulant(&self) -> CirculantMatrix<F> {
         let mut result = self.first_row.clone();
@@ -148,39 +163,116 @@ impl<F: FftField> ToeplitzMatrix<F> {
 
         let reversed = self.first_col.iter().skip(1).rev();
         result.extend(reversed);
+        CirculantMatrix::new(result)
+    }
 
+    pub fn is_power_of_two(&self) -> bool {
+        self.first_col.len().is_power_of_two() && self.first_col.len().is_power_of_two()
+    }
+
+    pub fn extend_to_toeplits_pow_2(&mut self) {
+        if !self.is_power_of_two() {
+            let row_pow_2_len = self.first_row.len().next_power_of_two();
+            let col_pow_2_len = self.first_col.len().next_power_of_two();
+            self.first_row
+                .extend(vec![F::zero(); row_pow_2_len - self.first_row.len()]);
+            self.first_col
+                .extend(vec![F::zero(); col_pow_2_len - self.first_col.len()]);
+        }
+    }
+
+    pub fn extend_to_circulant_pow_2(&mut self) -> CirculantMatrix<F> {
+        self.extend_to_toeplits_pow_2();
+
+        let mut result = self.first_row.clone();
+        result.push(*self.first_col.first().unwrap());
+
+        let reversed = self.first_col.iter().skip(1).rev();
+        result.extend(reversed);
         CirculantMatrix::new(result)
     }
 }
 
 impl<F: FftField> ToeplitzMatrix<F> {
-    pub fn fast_multiply_by_vec(&self, vector: &[F]) -> Result<Vec<F>, Box<dyn Error>> {
-        let circulant = self.extend_to_circulant();
+    // TODO: add here vector extension
+    pub fn fast_multiply_by_vec(&mut self, vector: &[F]) -> Result<Vec<F>, Box<dyn Error>> {
+        let circulant = self.extend_to_circulant_pow_2();
+
+        // TODO: extend the vector
+        let vec_len = vector.len();
+        let mut vector: Vec<F> = if vec_len.is_power_of_two() {
+            vector.to_vec()
+        } else {
+            let new_len = vec_len.next_power_of_two();
+            let mut extended_vector = Vec::with_capacity(new_len);
+            extended_vector.extend(vec![F::zero(); new_len - vec_len]);
+            extended_vector.extend_from_slice(vector);
+            extended_vector
+        };
+
+        let len = vector.len();
+        add_zeros_to_right(&mut vector, len);
 
         let result = circulant.fast_multiply_by_vec(&vector).unwrap();
         Ok(result)
+
+        // let vec_len = vector.len();
+        // let circulant = toeplitz.extend_to_circulant_pow_2();
+        // let circulant_len = circulant.vec_representation.len();
+        // add_zeros_to_right(&mut vector, circulant_len - vec_len);
+        // let vec = DVector::from_vec(vector.to_vec());
     }
 }
 
-// FIXME: There should be a way to define any max_degree, so that it wouldn't
-// break the hadamard multiplication. Because now, it should be the same as
-// the number of commit_to points.
-// TODO: the len should be defined by v1
-pub fn hadamard_product<G, F, C>(v1: &[G], v2: &[F]) -> Result<Vec<C>, Box<dyn Error>>
+pub fn hadamard_product<G, F, C>(v1: &[G], v2: &[F]) -> Result<Vec<C>, String>
 where
     G: Mul<Output = G> + Copy,
-    F: Clone + Mul<G, Output = C>,
-    Vec<G>: FromIterator<G>,
+    F: Clone + Mul<G, Output = C> + Copy,
 {
-    if v1.len() != v2.len() {
-        return Err("Vector lengths must match".into());
-    };
+    if v1.len() > v2.len() {
+        return Err("The length of vector1 should be less or equal to vector2".into());
+    }
 
-    Ok(v1
-        .iter()
-        .zip(v2.iter())
-        .map(|(ai, bi)| bi.clone() * *ai)
-        .collect())
+    Ok(v1.iter().zip(v2).map(|(ai, bi)| *bi * *ai).collect())
+}
+
+use ark_bn254::Fr;
+use ark_std::UniformRand;
+use rand::Rng;
+pub fn generate_toeplitz_matrix_and_vector<R: Rng>(
+    rng: &mut R,
+    length: usize,
+) -> (ToeplitzMatrix<Fr>, Vec<Fr>) {
+    // Create a sample Toeplitz matrix
+    let matrix_row = (0..length).map(|_| Fr::rand(rng)).collect::<Vec<_>>();
+    let mut matrix_column = Vec::new();
+    matrix_column.push(matrix_row[0]);
+    let extend_with = (1..length).map(|_| Fr::rand(rng)).collect::<Vec<_>>();
+    matrix_column.extend_from_slice(&extend_with);
+    let toeplitz = ToeplitzMatrix::new(matrix_row, matrix_column).unwrap();
+
+    // Create a sample vector
+    let vector = (0..length).map(|_| Fr::rand(rng)).collect::<Vec<_>>();
+
+    (toeplitz, vector)
+}
+
+pub fn generate_toeplitz_matrix_and_vector_for_proptests(
+    matrix_row: Vec<i64>,
+    matrix_col: Vec<i64>,
+    vector: Vec<i64>,
+) -> (ToeplitzMatrix<Fr>, Vec<Fr>) {
+    let matrix_row = matrix_row.into_iter().map(Fr::from).collect();
+    let matrix_col = matrix_col.into_iter().map(Fr::from).collect();
+    let vector = vector.into_iter().map(Fr::from).collect();
+
+    let toeplitz = ToeplitzMatrix::new(matrix_row, matrix_col).expect("Invalid matrix");
+
+    (toeplitz, vector)
+}
+
+pub fn add_zeros_to_right<T: Clone + ark_std::Zero>(vec: &mut Vec<T>, n: usize) {
+    vec.resize(vec.len() + n, T::zero());
 }
 
 #[cfg(test)]
@@ -189,13 +281,7 @@ mod tests {
     use ark_bn254::{Fr, G1Projective as G1};
     use ark_ec::Group;
     use ark_std::Zero;
-
     use nalgebra::DMatrix;
-
-    fn add_zeros_to_right<T: Clone + ark_std::Zero>(vec: &mut Vec<T>, n: usize) {
-        let zeros = vec![T::zero(); n];
-        vec.extend(zeros);
-    }
 
     fn is_toeplitz_matrix<F: PartialEq>(matrix: &[F]) -> bool {
         let n = (matrix.len() as f64).sqrt() as usize;
@@ -267,63 +353,82 @@ mod tests {
             + DomainCoeff<T>
             + ark_ff::FftField,
     >(
-        toeplitz: ToeplitzMatrix<T>,
+        mut toeplitz: ToeplitzMatrix<T>,
         mut vector: &mut Vec<T>,
     ) -> Result<(), Box<dyn Error>> {
-        let circulant = toeplitz.extend_to_circulant();
-
         // Calculate expected result by direct multiplication of Toeplitz matrix by vector
-        let len = toeplitz.first_row.len();
-        let mat = DMatrix::from_vec(len, len, toeplitz.get_matrix());
+        let toeplitz_len = toeplitz.first_row.len();
+        let mat = DMatrix::from_vec(toeplitz_len, toeplitz_len, toeplitz.get_matrix());
         let vec = DVector::from_vec(vector.to_vec());
         let expected_result_toeplitz = mat * vec;
 
-        // Calculate expected result by direct multiplication of Circulant matrix by vector
+        // Calculate expected result by direct multiplication of Circulant (extended Toeplitz to the matrix with len = n^2) matrix by vector
         let vec_len = vector.len();
-        add_zeros_to_right(&mut vector, vec_len);
-        let len = circulant.vec_representation.len();
-        let mat = DMatrix::from_vec(len, len, circulant.get_matrix());
+        let circulant = toeplitz.extend_to_circulant_pow_2();
+        let circulant_len = circulant.vec_representation.len();
+        add_zeros_to_right(&mut vector, circulant_len - vec_len);
         let vec = DVector::from_vec(vector.to_vec());
+
+        let mat = DMatrix::from_vec(circulant_len, circulant_len, circulant.get_matrix());
+
         let expected_result_circulant = mat * &vec;
 
         // Calculate the actual result
-        let result = circulant.fast_multiply_by_vec(&vector).unwrap();
+        let result_circulant = circulant.fast_multiply_by_vec(&vector).unwrap();
+        let result_toeplitz = toeplitz.fast_multiply_by_vec(&vector).unwrap();
 
         // Assert that the actual and expected result vectors are equal
-        let len = toeplitz.first_row.len();
-        if result == expected_result_circulant.as_slice()
-            && &result[0..len] == expected_result_toeplitz.as_slice()
+        if result_circulant[0..toeplitz_len]
+            == expected_result_circulant.as_slice()[0..toeplitz_len]
+            && result_circulant[0..toeplitz_len]
+                == expected_result_toeplitz.as_slice()[0..toeplitz_len]
+            && result_circulant[0..toeplitz_len] == result_toeplitz[0..toeplitz_len]
         {
+            // NOTE: this strings are useful for debugging
+            // println!(
+            //     "The actual: {:?} expected_result_circulant: {:?} expected_result_toeplitz: {:?}",
+            //     result, expected_result_circulant, expected_result_toeplitz
+            // );
             Ok(())
         } else {
             Err(format!(
-                "The actual: {:?}\nexpected_result_circulant: {:?}\nexpected_result_toeplitz: {:?} vectors are not equal",
-                result, expected_result_circulant, expected_result_toeplitz
-            )
-            .into())
+    "The actual (calculated with Circulant matrix) result: {:?}, The actual (calculated with Toeplitz matrix) result: {:?}, expected_result_circulant: {:?}, expected_result_toeplitz: {:?} vectors are not equal",
+    result_circulant, result_toeplitz, expected_result_circulant, expected_result_toeplitz
+).into())
         }
     }
 
     #[test]
-    fn test_toeplitz_to_circulant_extension() {}
-
-    #[test]
     fn test_hadamard_product() {
-        // Integer vectors
+        // Integer vectors (compatible)
         let v1 = vec![1, 2, 3];
         let v2 = vec![4, 5, 6];
         let expected_result = vec![4, 10, 18];
         assert_eq!(hadamard_product(&v1, &v2).unwrap(), expected_result);
 
+        // Integer vectors (compatible)
+        let v1 = vec![1, 2, 3];
+        let v2 = vec![4, 5, 6, 7, 8];
+        let expected_result = vec![4, 10, 18];
+        assert_eq!(hadamard_product(&v1, &v2).unwrap(), expected_result);
+
+        // Integer vectors (incompatible)
+        let v1 = vec![1, 2, 3, 4, 5];
+        let v2 = vec![4, 5, 6];
+        assert_eq!(
+            hadamard_product(&v1, &v2).unwrap_err(),
+            "The length of vector1 should be less or equal to vector2"
+        );
+
         // Floating-point vectors
-        let v3 = vec![0.5, 0.6, 0.7];
-        let v4 = vec![1.5, 3.6, 0.6];
+        let v1 = vec![0.5, 0.6, 0.7];
+        let v2 = vec![1.5, 3.6, 0.6];
         let expected_result2 = vec![0.75, 2.16, 0.42];
-        assert_eq!(hadamard_product(&v3, &v4).unwrap(), expected_result2);
+        assert_eq!(hadamard_product(&v1, &v2).unwrap(), expected_result2);
 
         // Fr and G1 vectors
-        let v5 = vec![Fr::from(1), Fr::from(2), Fr::from(3)];
-        let v6 = vec![
+        let v1 = vec![Fr::from(1), Fr::from(2), Fr::from(3)];
+        let v2 = vec![
             G1::generator() * Fr::from(1),
             G1::generator() * Fr::from(2),
             G1::generator() * Fr::from(3),
@@ -333,7 +438,7 @@ mod tests {
             G1::generator() * Fr::from(4),
             G1::generator() * Fr::from(9),
         ];
-        assert_eq!(hadamard_product(&v5, &v6).unwrap(), expected_result2);
+        assert_eq!(hadamard_product(&v1, &v2).unwrap(), expected_result2);
     }
 
     #[test]
@@ -392,8 +497,8 @@ mod tests {
 
     #[test]
     fn test_multiply_by_vector_incompatible() {
-        let matrix = CirculantMatrix::new(vec![Fr::from(1), Fr::from(2), Fr::from(3)]);
-        let vector = vec![Fr::from(5), Fr::from(6), Fr::from(7), Fr::from(8)];
+        let matrix = CirculantMatrix::new(vec![Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(4)]);
+        let vector = vec![Fr::from(6), Fr::from(7), Fr::from(8)];
 
         assert!(matrix.fast_multiply_by_vec(&vector).is_err());
     }
@@ -450,39 +555,17 @@ mod tests {
 
     use nalgebra::base::DVector;
 
+    // Generate values using random values
+    #[test]
+    fn test_toeplitz_matrix_vector_mut_custom_len() {
+        let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
+        let (toeplitz, mut vector) = generate_toeplitz_matrix_and_vector(&mut rng, 11);
+
+        test_toeplitz_matrix_vector_multiplication(toeplitz, &mut vector).unwrap()
+    }
+
     #[test]
     fn test_toeplitz_matrix_vector_mult_4() {
-        // Create a sample Toeplitz matrix
-        // 1 2
-        // 3 1
-        let toeplitz = ToeplitzMatrix::new(
-            vec![Fr::from(1), Fr::from(2)],
-            vec![Fr::from(1), Fr::from(3)],
-        )
-        .unwrap();
-
-        // Create a sample vector
-        let mut vector = vec![G1::generator() * Fr::from(4), G1::generator() * Fr::from(5)];
-        let len = vector.len();
-        add_zeros_to_right(&mut vector, len);
-
-        // Perform Toeplitz matrix multiplication by vector
-        let circulant = toeplitz.extend_to_circulant();
-
-        let result = circulant.fast_multiply_by_vec(&vector).unwrap();
-
-        let expected_result = vec![
-            G1::generator() * Fr::from(19),
-            G1::generator() * Fr::from(13),
-            G1::generator() * Fr::from(14),
-            G1::generator() * Fr::from(17),
-        ];
-
-        // Assert that the actual and expected result vectors are equal
-        assert_eq!(result, expected_result);
-    }
-    #[test]
-    fn test_toeplitz_matrix_vector_mult_4_direct() {
         // Create a sample Toeplitz matrix
         // 1 2
         // 3 1
@@ -498,26 +581,22 @@ mod tests {
         test_toeplitz_matrix_vector_multiplication(toeplitz, &mut vector).unwrap()
     }
 
-    // // FIXME: I should check why this isn't working with odd amounts and how to fix it
-    // #[test]
-    // fn test_toeplitz_matrix_vector_mult_6() {
-    //     // Create a sample Toeplitz matrix
-    //     // 1 2 3
-    //     // 4 1 2
-    //     // 5 4 1
-    //     let toeplitz = ToeplitzMatrix::new(
-    //         vec![Fr::from(1), Fr::from(2), Fr::from(3)],
-    //         vec![Fr::from(1), Fr::from(4), Fr::from(5)],
-    //     )
-    //     .unwrap();
+    #[test]
+    fn test_toeplitz_matrix_vector_mult_6() {
+        // Create a sample Toeplitz matrix
+        // 1 2 3
+        // 4 1 2
+        // 5 4 1
+        let toeplitz = ToeplitzMatrix::new(
+            vec![Fr::from(1), Fr::from(2), Fr::from(3)],
+            vec![Fr::from(1), Fr::from(4), Fr::from(5)],
+        )
+        .unwrap();
 
-    //     let mut vector = vec![Fr::from(6), Fr::from(7), Fr::from(8)];
+        let mut vector = vec![Fr::from(6), Fr::from(7), Fr::from(8)];
 
-    //     assert!(test_toeplitz_matrix_vector_multiplication(
-    //         toeplitz,
-    //         &mut vector
-    //     ));
-    // }
+        test_toeplitz_matrix_vector_multiplication(toeplitz, &mut vector).unwrap()
+    }
 
     #[test]
     fn test_toeplitz_matrix_vector_mult_8() {
@@ -534,127 +613,75 @@ mod tests {
 
         // Create a sample vector
         let mut vector = vec![Fr::from(8), Fr::from(9), Fr::from(10), Fr::from(11)];
-        add_zeros_to_right(&mut vector, 4);
-
-        // Perform Toeplitz matrix multiplication by vector
-        let circulant = toeplitz.extend_to_circulant();
-        // let circulant = CirculantMatrix::compute_circulant_matrix(&toeplitz);
-
-        let result = circulant.fast_multiply_by_vec(&vector).unwrap();
-
-        // a0   a−1  a−2  a−3    a0   a3   a2   a1
-        // a1   a0   a−1  a−2    a−3  a0   a3   a2
-        // a2   a1   a0   a−1    a−2  a−3  a0   a3
-        // a3   a2   a1   a0     a−1  a−2  a−3  a0
-        //
-        // a0   a3   a2   a1     a0   a−1  a−2  a−3
-        // a−3  a0   a3   a2     a1   a0   a−1  a−2
-        // a−2  a−3  a0   a3     a2   a1   a0   a−1
-        // a−1  a−2  a−3  a0     a3   a2   a1   a0
-
-        // first_row, // a0 a-1 a-2 a-3  1 2 3
-        // first_col, // a0 a1 a2 a3 1 5 4
-
-        // Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(4), Fr::from(1), Fr::from(5), Fr::from(6), Fr::from(7),
-        // Fr::from(7), Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(4), Fr::from(1), Fr::from(5), Fr::from(6),
-        // Fr::from(6), Fr::from(7), Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(4), Fr::from(1), Fr::from(5),
-        // Fr::from(5), Fr::from(6), Fr::from(7), Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(4), Fr::from(1),
-        // Fr::from(1), Fr::from(5), Fr::from(6), Fr::from(7), Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(4),
-        // Fr::from(4), Fr::from(1), Fr::from(5), Fr::from(6), Fr::from(7), Fr::from(1), Fr::from(2), Fr::from(3),
-        // Fr::from(3), Fr::from(4), Fr::from(1), Fr::from(5), Fr::from(6), Fr::from(7), Fr::from(1), Fr::from(2),
-        // Fr::from(2), Fr::from(3), Fr::from(4), Fr::from(1), Fr::from(5), Fr::from(6), Fr::from(7), Fr::from(1),
-        let mat = DMatrix::from_vec(
-            8,
-            8,
-            vec![
-                Fr::from(1),
-                Fr::from(2),
-                Fr::from(3),
-                Fr::from(4),
-                Fr::from(1),
-                Fr::from(5),
-                Fr::from(6),
-                Fr::from(7),
-                Fr::from(7),
-                Fr::from(1),
-                Fr::from(2),
-                Fr::from(3),
-                Fr::from(4),
-                Fr::from(1),
-                Fr::from(5),
-                Fr::from(6),
-                Fr::from(6),
-                Fr::from(7),
-                Fr::from(1),
-                Fr::from(2),
-                Fr::from(3),
-                Fr::from(4),
-                Fr::from(1),
-                Fr::from(5),
-                Fr::from(5),
-                Fr::from(6),
-                Fr::from(7),
-                Fr::from(1),
-                Fr::from(2),
-                Fr::from(3),
-                Fr::from(4),
-                Fr::from(1),
-                Fr::from(1),
-                Fr::from(5),
-                Fr::from(6),
-                Fr::from(7),
-                Fr::from(1),
-                Fr::from(2),
-                Fr::from(3),
-                Fr::from(4),
-                Fr::from(4),
-                Fr::from(1),
-                Fr::from(5),
-                Fr::from(6),
-                Fr::from(7),
-                Fr::from(1),
-                Fr::from(2),
-                Fr::from(3),
-                Fr::from(3),
-                Fr::from(4),
-                Fr::from(1),
-                Fr::from(5),
-                Fr::from(6),
-                Fr::from(7),
-                Fr::from(1),
-                Fr::from(2),
-                Fr::from(2),
-                Fr::from(3),
-                Fr::from(4),
-                Fr::from(1),
-                Fr::from(5),
-                Fr::from(6),
-                Fr::from(7),
-                Fr::from(1),
-            ],
-        );
-        let vec = DVector::from_vec(vector);
-        let expected_result = mat * vec;
-
-        // Assert that the actual and expected result vectors are equal
-        assert_eq!(expected_result.as_slice(), result);
-    }
-    #[test]
-    fn test_toeplitz_matrix_vector_mult_8_direct() {
-        // Create a sample Toeplitz matrix
-        // 1 2 3 4
-        // 7 1 2 3
-        // 6 7 1 2
-        // 5 6 7 1
-        let toeplitz = ToeplitzMatrix::new(
-            vec![Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(4)],
-            vec![Fr::from(1), Fr::from(7), Fr::from(6), Fr::from(5)],
-        )
-        .unwrap();
-
-        // Create a sample vector
-        let mut vector = vec![Fr::from(8), Fr::from(9), Fr::from(10), Fr::from(11)];
 
         test_toeplitz_matrix_vector_multiplication(toeplitz, &mut vector).unwrap()
+    }
+
+    use proptest::collection;
+    use proptest::prelude::any;
+    use proptest::prelude::Arbitrary;
+    use proptest::prelude::BoxedStrategy;
+    use proptest::proptest;
+    use proptest::strategy::Strategy;
+    #[derive(Debug)]
+    pub struct MatVecInput {
+        // The main rule: the first elements of matrix_row and matrix_col must be equal
+        pub matrix_row: Vec<i64>,
+        pub matrix_col: Vec<i64>,
+        pub vector: Vec<i64>,
+    }
+
+    impl Arbitrary for MatVecInput {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+            collection::vec(any::<i64>(), 1..=100)
+                .prop_flat_map(|vec| {
+                    let size = vec.len();
+                    let first_element = vec[0];
+                    (
+                        collection::vec(any::<i64>(), size),
+                        collection::vec(any::<i64>(), size),
+                        collection::vec(any::<i64>(), size),
+                    )
+                        .prop_map(
+                            move |(mut matrix_row, mut matrix_col, vector)| {
+                                matrix_row[0] = first_element;
+                                matrix_col[0] = first_element;
+                                MatVecInput::new(matrix_row, matrix_col, vector)
+                            },
+                        )
+                })
+                .boxed()
+        }
+    }
+
+    impl MatVecInput {
+        pub fn new(matrix_row: Vec<i64>, matrix_col: Vec<i64>, vector: Vec<i64>) -> Self {
+            MatVecInput {
+                matrix_row,
+                matrix_col,
+                vector,
+            }
+        }
+
+        pub fn get_fr_matrix(self) -> Result<(ToeplitzMatrix<Fr>, Vec<Fr>), Box<dyn Error>> {
+            let matrix_row = self.matrix_row.into_iter().map(Fr::from).collect();
+            let matrix_col = self.matrix_col.into_iter().map(Fr::from).collect();
+            let vector = self.vector.into_iter().map(Fr::from).collect();
+
+            let toeplitz = ToeplitzMatrix::new(matrix_row, matrix_col)?;
+            Ok((toeplitz, vector))
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn toeplitz_matrix_vector_multiplication(input in any::<MatVecInput>()) {
+            let (matrix, mut vector) = input.get_fr_matrix().unwrap();
+
+            test_toeplitz_matrix_vector_multiplication(matrix, &mut vector).unwrap();
+        }
     }
 }

@@ -19,17 +19,17 @@ impl ElPoint {
 }
 
 pub fn el_lagrange_interpolation(points: &[ElPoint]) -> Vec<ark_bn254::Fr> {
-    let mut result_polynomial = vec![ark_bn254::Fr::zero(); points.len()];
+    let mut result_polynomial = vec![Fr::zero(); points.len()];
     let mut temp_polynomial = Vec::with_capacity(points.len());
 
     for (i, point1) in points.iter().enumerate() {
         temp_polynomial.clear();
-        temp_polynomial.push(ark_bn254::Fr::one());
-        let mut denominator = ark_bn254::Fr::one();
+        temp_polynomial.push(Fr::one());
+        let mut denominator = Fr::one();
 
         for (j, point2) in points.iter().enumerate() {
             if i != j {
-                temp_polynomial.push(ark_bn254::Fr::zero());
+                temp_polynomial.push(Fr::zero());
                 let temp_polynomial_clone = temp_polynomial.clone();
                 for k in (1..temp_polynomial.len()).rev() {
                     temp_polynomial[k] -= point2.x * temp_polynomial_clone[k - 1];

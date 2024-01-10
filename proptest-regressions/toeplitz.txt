@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 00c2da40f7ff23fdd303e52384debacf0b80944388d9fd59aaf264d046980aa7 # shrinks to input = MatVecInput { matrix_row: [], matrix_col: [], vector: [] }

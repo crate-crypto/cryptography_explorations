@@ -12,8 +12,17 @@ ark-ec = "0.4.0"
 ark-poly = "0.4.2"
 rand = "0.8.5"
 ark-ff = "0.4.2"
+nalgebra = "0.32.3"
 
 [dev-dependencies]
 criterion = "0.3.4"
 proptest = "1.4.0"
-nalgebra = "0.32.3"
+
+
+[[bench]]
+name = "toeplitz_multiplication"
+harness = false
+
+[[bench]]
+name = "hadamard_product"
+harness = false
