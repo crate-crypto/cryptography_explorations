@@ -12,6 +12,7 @@ ark-ec = "0.4.0"
 ark-poly = "0.4.2"
 rand = "0.8.5"
 ark-ff = "0.4.2"
+ark-msm = "0.3.0-alpha.1"
 nalgebra = "0.32.3"
 
 [dev-dependencies]

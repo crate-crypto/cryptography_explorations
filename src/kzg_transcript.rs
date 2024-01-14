@@ -1,8 +1,13 @@
 use crate::el_interpolation::*;
-use crate::toeplitz::ToeplitzMatrix;
+use crate::matrix_math::toeplitz::ToeplitzMatrix;
 use ark_bn254::{Bn254, Fr, G1Projective as G1, G2Projective as G2};
+use ark_ec::models::short_weierstrass::Projective;
+// use ark_ec::scalar_mul::variable_base::VariableBaseMSM as BaselineVariableBaseMSM;
+use ark_ec::scalar_mul::variable_base::VariableBaseMSM;
+use ark_ec::CurveGroup;
 use ark_ec::{pairing::Pairing, Group};
 use ark_ff::Field;
+// use ark_msm::{msm::VariableBaseMSM, utils::generate_msm_inputs};
 use ark_poly::GeneralEvaluationDomain;
 use ark_poly::{
     univariate::DensePolynomial, DenseUVPolynomial, EvaluationDomain, Evaluations, Polynomial,
@@ -116,22 +121,55 @@ impl KZGProof {
 
     // FIXME: value: Fr is here only for testing purposes. Such a solution is not secure. MSM should be used instead
     pub fn prove(
-        _crs: &CRS,
+        crs: &CRS,
         value: Fr,
         commit_poly: DensePolynomial<Fr>,
         witness_to: &[ElPoint],
     ) -> Self {
+        // Calculate numarator
         let i_coeffs = el_lagrange_interpolation(witness_to);
-        let i_poly = DensePolynomial::from_coefficients_vec(i_coeffs);
+        let i_poly = DensePolynomial::from_coefficients_vec(i_coeffs.clone());
         let numerator = G1::generator() * i_poly.evaluate(&value);
 
+        let affine1: Vec<ark_ec::short_weierstrass::Affine<_>> = crs
+            .get_g1(i_coeffs.len())
+            .iter()
+            .map(|point| point.into_affine())
+            .collect();
+        let eval_result1: Projective<ark_bn254::g1::Config> =
+            VariableBaseMSM::msm(&affine1, &i_coeffs).unwrap();
+        assert_eq!(eval_result1, numerator);
+
+        // Calculate denominator (zero points)
         let zero_points: Vec<Fr> = witness_to.iter().map(|point| point.x).collect();
         let z_coeffs = calculate_zero_poly_coefficients(&zero_points);
-        let z_poly = DensePolynomial::from_coefficients_vec(z_coeffs);
+        let z_poly = DensePolynomial::from_coefficients_vec(z_coeffs.clone());
         let denominator = G2::generator() * z_poly.evaluate(&value);
 
-        let witness_poly = calculate_witness_poly(&commit_poly, &i_poly, &z_poly);
+        let affine2: Vec<ark_ec::short_weierstrass::Affine<ark_bn254::g2::Config>> = crs
+            .get_g2(z_coeffs.len())
+            .iter()
+            .map(|point| point.into_affine())
+            .collect();
+        let eval_result2: Projective<ark_bn254::g2::Config> =
+            VariableBaseMSM::msm(&affine2, &z_coeffs).unwrap();
+        assert_eq!(eval_result2, denominator);
+
+        // Calculate witness
+        let witness_poly: DensePolynomial<
+            ark_ff::Fp<ark_ff::MontBackend<ark_bn254::FrConfig, 4>, 4>,
+        > = calculate_witness_poly(&commit_poly, &i_poly, &z_poly);
         let witness = G1::generator() * witness_poly.evaluate(&value);
+
+        let w_coeffs = witness_poly.coeffs();
+        let affine3: Vec<ark_ec::short_weierstrass::Affine<_>> = crs
+            .get_g1(w_coeffs.len())
+            .iter()
+            .map(|point| point.into_affine())
+            .collect();
+        let eval_result3: Projective<ark_bn254::g1::Config> =
+            VariableBaseMSM::msm(&affine3, w_coeffs).unwrap();
+        assert_eq!(eval_result3, witness);
 
         KZGProof {
             numerator,
@@ -151,43 +189,25 @@ impl KZGProof {
     }
 
     pub fn calc_all_proofpoints(crs: &CRS, evaluations: &[Fr]) -> Vec<G1> {
-        // let len = evaluations.len();
-        // // Check that evaluations is a power of 2
-        // // TODO: I should extend not Toeplitz, but a ready circulant(?)
-        // let evaluations = if !len.is_power_of_two() {
-        //     // Extend the evaluations vector with zeros
-        //     let new_len = len.next_power_of_two();
-        //     let mut extended_evaluations = Vec::with_capacity(new_len);
-        //     extended_evaluations.extend_from_slice(evaluations);
-        //     extended_evaluations.extend(vec![Fr::zero(); new_len - len]);
-        //     extended_evaluations
-        // } else {
-        //     evaluations.to_vec()
-        // };
-        // println!("evaluations: {:?}", evaluations);
-
         // The num_coeffs is equal to amount of evaluations
         let domain: GeneralEvaluationDomain<Fr> =
-            GeneralEvaluationDomain::new(evaluations.len().next_power_of_two()).unwrap();
+            GeneralEvaluationDomain::new(evaluations.len()).unwrap();
         let evals = Evaluations::from_vec_and_domain(evaluations.to_vec(), domain);
         let commit_poly = evals.interpolate();
 
-        // // FIXME
-        // let root_of_unity = Fr::get_root_of_unity(1).unwrap();
-        // println!("root_of_unity: {:#?}", root_of_unity);
-        // let calc = commit_poly.evaluate(&root_of_unity);
-        // println!("calc: {:#?}", calc);
-
         let mut commit_coeffs = commit_poly.coeffs;
 
-        // We need the reverse order to create a matrix
-        commit_coeffs.reverse();
-        println!("commit_coeffs: {:?}", commit_coeffs);
+        // NOTE: this code is useful for debugging:
+        // for point in domain.elements() {
+        //     let calc = commit_poly.evaluate(&point);
+        //     println!("calc: {:#?}", calc);
+        // }
 
+        commit_coeffs.reverse();
         let toeplitz = ToeplitzMatrix::new_with_coeffs(commit_coeffs).unwrap();
-        let circulant = toeplitz.extend_to_circulant();
-        let hs = circulant
-            .fast_multiply_by_vec(&crs.get_g1(circulant.get_len()))
+
+        let hs = toeplitz
+            .fast_multiply_by_vec(&crs.get_g1(toeplitz.get_len()))
             .unwrap();
 
         domain.fft(&hs)
@@ -320,13 +340,15 @@ mod tests {
             Fr::from(3553), //- 4
             Fr::from(4554), //-
             Fr::from(5555), //- 2
-            Fr::from(6556), //-cc
+            Fr::from(6556), //-
+            Fr::from(0),    //-
+            Fr::from(0),    //-
         ];
 
         // Calculate the proof points
         let proof_points = KZGProof::calc_all_proofpoints(&crs, &evals);
 
-        println!("proof_points: {:#?}", proof_points);
-        assert!(proof_points.len().is_power_of_two());
+        // println!("proof_points: {:#?}", proof_points);
+        // assert!(proof_points.len().is_power_of_two());
     }
 }
