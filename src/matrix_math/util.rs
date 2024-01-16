@@ -1,6 +1,6 @@
 use ark_std::ops::Mul;
+use rayon::prelude::*;
 
-// TODO: this one could be more efficient using nalgebra crate
 pub fn hadamard_product<G, F, C>(v1: &[G], v2: &[F]) -> Result<Vec<C>, String>
 where
     G: Mul<Output = G> + Copy + Sync,
@@ -11,7 +11,13 @@ where
         return Err("The length of vector1 should be less or equal to vector2".into());
     }
 
-    Ok(v1.iter().zip(v2).map(|(ai, bi)| *bi * *ai).collect())
+    let result: Vec<C> = v1
+        .par_iter()
+        .zip(v2.par_iter())
+        .map(|(ai, bi)| *bi * *ai)
+        .collect();
+
+    Ok(result)
 }
 
 // Function that is responsible for vector extension from the right side

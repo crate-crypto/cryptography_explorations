@@ -1,7 +1,5 @@
-use crate::matrix_math::add_zeros_to_right;
-use crate::matrix_math::CirculantMatrix;
+use crate::matrix_math::{add_zeros_to_right, CirculantMatrix};
 use ark_ff::FftField;
-
 use ark_poly::domain::DomainCoeff;
 use ark_std::vec::Vec;
 use std::error::Error;

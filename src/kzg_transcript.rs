@@ -1,16 +1,13 @@
-use crate::el_interpolation::*;
-use crate::matrix_math::toeplitz::ToeplitzMatrix;
+use crate::{el_interpolation::*, matrix_math::toeplitz::ToeplitzMatrix};
 use ark_bn254::{Bn254, Fr, G1Projective as G1, G2Projective as G2};
-use ark_ec::models::short_weierstrass::Projective;
-// use ark_ec::scalar_mul::variable_base::VariableBaseMSM as BaselineVariableBaseMSM;
-use ark_ec::scalar_mul::variable_base::VariableBaseMSM;
-use ark_ec::CurveGroup;
+use ark_ec::{
+    models::short_weierstrass::Projective, scalar_mul::variable_base::VariableBaseMSM, CurveGroup,
+};
 use ark_ec::{pairing::Pairing, Group};
 use ark_ff::Field;
-// use ark_msm::{msm::VariableBaseMSM, utils::generate_msm_inputs};
-use ark_poly::GeneralEvaluationDomain;
 use ark_poly::{
-    univariate::DensePolynomial, DenseUVPolynomial, EvaluationDomain, Evaluations, Polynomial,
+    univariate::DensePolynomial, DenseUVPolynomial, EvaluationDomain, Evaluations,
+    GeneralEvaluationDomain,
 };
 use ark_std::UniformRand;
 use rand::Rng;
@@ -101,16 +98,25 @@ impl KZGProof {
     }
 
     // This function is for the verifier, so that he can build a proof using witness_to array, CRS and then check that it was generated correctly
-    // FIXME: value: Fr is here only for testing purposes. Such a solution is not secure. MSM should be used instead
-    pub fn new_with_witness(witness_to: &[ElPoint], value: Fr, witness: G1) -> Self {
+    pub fn new_with_witness(witness_to: &[ElPoint], crs: &CRS, witness: G1) -> Self {
         let i_coeffs = el_lagrange_interpolation(witness_to);
-        let i_poly = DensePolynomial::from_coefficients_vec(i_coeffs);
-        let numerator = G1::generator() * i_poly.evaluate(&value);
+        let i_affine: Vec<ark_ec::short_weierstrass::Affine<_>> = crs
+            .get_g1(i_coeffs.len())
+            .iter()
+            .map(|point| point.into_affine())
+            .collect();
+        let numerator: Projective<ark_bn254::g1::Config> =
+            VariableBaseMSM::msm(&i_affine, &i_coeffs).unwrap();
 
         let zero_points: Vec<Fr> = witness_to.iter().map(|point| point.x).collect();
         let z_coeffs = calculate_zero_poly_coefficients(&zero_points);
-        let z_poly = DensePolynomial::from_coefficients_vec(z_coeffs);
-        let denominator = G2::generator() * z_poly.evaluate(&value);
+        let z_affine: Vec<ark_ec::short_weierstrass::Affine<ark_bn254::g2::Config>> = crs
+            .get_g2(z_coeffs.len())
+            .iter()
+            .map(|point| point.into_affine())
+            .collect();
+        let denominator: Projective<ark_bn254::g2::Config> =
+            VariableBaseMSM::msm(&z_affine, &z_coeffs).unwrap();
 
         KZGProof {
             numerator,
@@ -119,57 +125,42 @@ impl KZGProof {
         }
     }
 
-    // FIXME: value: Fr is here only for testing purposes. Such a solution is not secure. MSM should be used instead
-    pub fn prove(
-        crs: &CRS,
-        value: Fr,
-        commit_poly: DensePolynomial<Fr>,
-        witness_to: &[ElPoint],
-    ) -> Self {
+    pub fn prove(crs: &CRS, commit_poly: DensePolynomial<Fr>, witness_to: &[ElPoint]) -> Self {
         // Calculate numarator
         let i_coeffs = el_lagrange_interpolation(witness_to);
         let i_poly = DensePolynomial::from_coefficients_vec(i_coeffs.clone());
-        let numerator = G1::generator() * i_poly.evaluate(&value);
-
-        let affine1: Vec<ark_ec::short_weierstrass::Affine<_>> = crs
+        let i_affine: Vec<ark_ec::short_weierstrass::Affine<_>> = crs
             .get_g1(i_coeffs.len())
             .iter()
             .map(|point| point.into_affine())
             .collect();
-        let eval_result1: Projective<ark_bn254::g1::Config> =
-            VariableBaseMSM::msm(&affine1, &i_coeffs).unwrap();
-        assert_eq!(eval_result1, numerator);
+        let numerator: Projective<ark_bn254::g1::Config> =
+            VariableBaseMSM::msm(&i_affine, &i_coeffs).unwrap();
 
         // Calculate denominator (zero points)
         let zero_points: Vec<Fr> = witness_to.iter().map(|point| point.x).collect();
         let z_coeffs = calculate_zero_poly_coefficients(&zero_points);
         let z_poly = DensePolynomial::from_coefficients_vec(z_coeffs.clone());
-        let denominator = G2::generator() * z_poly.evaluate(&value);
-
-        let affine2: Vec<ark_ec::short_weierstrass::Affine<ark_bn254::g2::Config>> = crs
+        let z_affine: Vec<ark_ec::short_weierstrass::Affine<ark_bn254::g2::Config>> = crs
             .get_g2(z_coeffs.len())
             .iter()
             .map(|point| point.into_affine())
             .collect();
-        let eval_result2: Projective<ark_bn254::g2::Config> =
-            VariableBaseMSM::msm(&affine2, &z_coeffs).unwrap();
-        assert_eq!(eval_result2, denominator);
+        let denominator: Projective<ark_bn254::g2::Config> =
+            VariableBaseMSM::msm(&z_affine, &z_coeffs).unwrap();
 
         // Calculate witness
         let witness_poly: DensePolynomial<
             ark_ff::Fp<ark_ff::MontBackend<ark_bn254::FrConfig, 4>, 4>,
         > = calculate_witness_poly(&commit_poly, &i_poly, &z_poly);
-        let witness = G1::generator() * witness_poly.evaluate(&value);
-
         let w_coeffs = witness_poly.coeffs();
-        let affine3: Vec<ark_ec::short_weierstrass::Affine<_>> = crs
+        let w_affine: Vec<ark_ec::short_weierstrass::Affine<_>> = crs
             .get_g1(w_coeffs.len())
             .iter()
             .map(|point| point.into_affine())
             .collect();
-        let eval_result3: Projective<ark_bn254::g1::Config> =
-            VariableBaseMSM::msm(&affine3, w_coeffs).unwrap();
-        assert_eq!(eval_result3, witness);
+        let witness: Projective<ark_bn254::g1::Config> =
+            VariableBaseMSM::msm(&w_affine, w_coeffs).unwrap();
 
         KZGProof {
             numerator,
@@ -217,6 +208,7 @@ impl KZGProof {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ark_poly::Polynomial;
     use ark_std::One;
     use ark_std::Zero;
 
@@ -260,11 +252,11 @@ mod tests {
         let commitment = G1::generator() * commit_poly.evaluate(&value);
 
         // Prover use case
-        let proof = KZGProof::prove(&crs, value, commit_poly, &witness_to);
+        let proof = KZGProof::prove(&crs, commit_poly, &witness_to);
         assert!(proof.verify(commitment));
 
         // Verifier use case
-        let verifier = KZGProof::new_with_witness(&witness_to, value, proof.witness);
+        let verifier = KZGProof::new_with_witness(&witness_to, &crs, proof.witness);
         assert!(verifier.verify(commitment));
     }
 
@@ -289,7 +281,7 @@ mod tests {
         let commit_poly = DensePolynomial::from_coefficients_vec(commit_coeffs);
         let commitment = G1::generator() * commit_poly.evaluate(&value);
 
-        let proof = KZGProof::prove(&crs, value, commit_poly, &witness_to);
+        let proof = KZGProof::prove(&crs, commit_poly, &witness_to);
 
         assert!(proof.verify(commitment));
     }
@@ -341,14 +333,15 @@ mod tests {
             Fr::from(4554), //-
             Fr::from(5555), //- 2
             Fr::from(6556), //-
-            Fr::from(0),    //-
-            Fr::from(0),    //-
+                            // Fr::from(0),    //-
+                            // Fr::from(0),    //-
         ];
 
         // Calculate the proof points
         let proof_points = KZGProof::calc_all_proofpoints(&crs, &evals);
 
-        // println!("proof_points: {:#?}", proof_points);
-        // assert!(proof_points.len().is_power_of_two());
+        // FIXME: this doesn't imply that the proof points are correct
+        println!("proof_points: {:#?}", proof_points);
+        assert!(proof_points.len().is_power_of_two());
     }
 }

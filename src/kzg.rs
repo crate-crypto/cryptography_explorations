@@ -1,11 +1,10 @@
-use crate::el_interpolation::{el_lagrange_interpolation, ElPoint};
-use crate::kzg_transcript::KZGProof;
-use crate::kzg_transcript::CRS;
+use crate::{
+    el_interpolation::{el_lagrange_interpolation, ElPoint},
+    kzg_transcript::{KZGProof, CRS},
+};
 use ark_bn254::{Fr, G1Projective as G1};
 use ark_ec::Group;
-use ark_poly::univariate::DensePolynomial;
-use ark_poly::DenseUVPolynomial;
-use ark_poly::Polynomial;
+use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial, Polynomial};
 use ark_std::Zero;
 
 #[derive(Debug, Clone, Copy)]
@@ -75,7 +74,7 @@ mod tests {
         let commit_poly = DensePolynomial::from_coefficients_vec(commit_coeff.to_vec());
         let commitment = KZGCommitment::commit_poly(&commit_to, &crs, value);
         // Generate proof
-        let proof = KZGProof::prove(&crs, value, commit_poly, &witness_to);
+        let proof = KZGProof::prove(&crs, commit_poly, &witness_to);
 
         // Verify polynomial
         assert!(KZGCommitment::verify_poly(

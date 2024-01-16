@@ -1,8 +1,6 @@
-use crate::matrix_math::hadamard_product;
-use crate::matrix_math::toeplitz::ToeplitzMatrix;
+use crate::matrix_math::{hadamard_product, toeplitz::ToeplitzMatrix};
 use ark_ff::FftField;
-use ark_poly::GeneralEvaluationDomain;
-use ark_poly::{domain::DomainCoeff, EvaluationDomain};
+use ark_poly::{domain::DomainCoeff, EvaluationDomain, GeneralEvaluationDomain};
 use ark_std::vec::Vec;
 use std::error::Error;
 

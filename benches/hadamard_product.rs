@@ -1,10 +1,25 @@
+use ark_bn254::Fr;
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use cryptography_exploration::matrix_math::util::hadamard_product;
 use nalgebra::DMatrix;
 
 fn hadamard_benchmark(c: &mut Criterion) {
-    let v1 = vec![0.5, 0.6, 0.7];
-    let v2 = vec![1.5, 3.6, 0.6];
+    let v1 = vec![
+        Fr::from(1),
+        Fr::from(2),
+        Fr::from(3),
+        Fr::from(4),
+        Fr::from(5),
+        Fr::from(6),
+    ];
+    let v2 = vec![
+        Fr::from(6),
+        Fr::from(5),
+        Fr::from(4),
+        Fr::from(3),
+        Fr::from(2),
+        Fr::from(1),
+    ];
     let matrix = DMatrix::from_vec(1, v1.len(), v1.clone());
     let vector = DMatrix::from_vec(1, v2.len(), v2.clone());
 
